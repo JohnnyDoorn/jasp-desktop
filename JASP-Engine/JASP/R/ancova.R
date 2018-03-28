@@ -748,6 +748,11 @@ Ancova <- function(dataset=NULL, options, perform="run", callback=function(...) 
 			fields[[length(fields) + 1]] <- list(name="\u03C9\u00B2", type="number", format="dp:3")
 		}
 	}
+	
+	if (options$welchAnova) {
+    fields[[length(fields) + 1]] <- list(name="dfWelch", type="integer")
+    fields[[length(fields) + 1]] <- list(name="pWelch", type="number", format="sf:4;dp:3")
+	}
 
 	anova[["schema"]] <- list(fields=fields)
 
@@ -895,6 +900,10 @@ Ancova <- function(dataset=NULL, options, perform="run", callback=function(...) 
 
 				if (options$VovkSellkeMPR){
 					row[["VovkSellkeMPR"]] <-  ifelse(p!="",.VovkSellkeMPR(p),"")
+				}
+				if (options$welchAnova){
+				  row[["dfWelch"]] <-  "."
+				  row[["pWelch"]] <-  "."
 				}
 
 				rows[[length(rows) + 1]] <- row

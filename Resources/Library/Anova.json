@@ -119,6 +119,10 @@
 			"type": "Boolean"
 		},
 		{
+			"name": "welchAnova",
+			"type": "Boolean"
+		},
+		{
 			"name": "plotHorizontalAxis",
 			"type": "Variable"
 		},

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>644</width>
-    <height>671</height>
+    <height>691</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -453,14 +453,80 @@
          <bool>true</bool>
         </property>
         <layout class="QGridLayout" name="gridLayout_8">
-         <item row="1" column="0">
+         <item row="2" column="1">
+          <widget class="QWidget" name="latentCont" native="true">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout">
+            <item>
+             <widget class="BoundCheckBox" name="useLatentNormalKendallTau">
+              <property name="enabled">
+               <bool>false</bool>
+              </property>
+              <property name="text">
+               <string>Use data augmentation</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QWidget" name="kendallSamplesNumberContainer" native="true">
+              <property name="enabled">
+               <bool>false</bool>
+              </property>
+              <layout class="QHBoxLayout" name="horizontalLayout">
+               <property name="leftMargin">
+                <number>24</number>
+               </property>
+               <property name="topMargin">
+                <number>0</number>
+               </property>
+               <property name="bottomMargin">
+                <number>0</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="label_11_1">
+                 <property name="text">
+                  <string>No. samples</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="BoundTextBox" name="tauSamplesNumber">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>60</width>
+                   <height>0</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>60</width>
+                   <height>16777215</height>
+                  </size>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item row="0" column="0" colspan="2">
           <widget class="QRadioButton" name="radioButton">
            <property name="text">
             <string>Pearson's rho</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="1" column="0" colspan="2">
           <widget class="QRadioButton" name="radioButton_2">
            <property name="text">
             <string>Kendall's tau-b</string>
@@ -692,6 +758,86 @@
     <hint type="destinationlabel">
      <x>432</x>
      <y>488</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>radioButton_2</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>latentCont</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>157</x>
+     <y>293</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>155</x>
+     <y>346</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>useLatentNormalKendallTau</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>kendallSamplesNumberContainer</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>131</x>
+     <y>320</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>155</x>
+     <y>359</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>useLatentNormalKendallTau</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>plotBayesFactorRobustness</receiver>
+   <slot>setDisabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>131</x>
+     <y>320</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>432</x>
+     <y>488</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>useLatentNormalKendallTau</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>plotSequentialAnalysis</receiver>
+   <slot>setDisabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>131</x>
+     <y>320</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>432</x>
+     <y>536</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>radioButton_2</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>useLatentNormalKendallTau</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>137</x>
+     <y>293</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>155</x>
+     <y>329</y>
     </hint>
    </hints>
   </connection>

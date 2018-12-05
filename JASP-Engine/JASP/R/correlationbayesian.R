@@ -1662,7 +1662,8 @@ CorrelationBayesian <- function(dataset=NULL, options, perform="run",
 }
 
 
-.bfKendallTau <- function(n, tauObs, kappa=1, var=1, ciValue=0.95) {
+.bfKendallTau <- function(n, tauObs, kappa=1, var=1, ciValue=0.95, xVals=NULL, yVals=NULL,
+                          useLatentNormalKendallTau=FALSE, tauSamplesNumber=1e3) {
     # TODO (Johnny): Wrapper around .bfCorrieKernelKendallTau to loop over the different methods, if any
     #
     result <- list(bf10=NA, bfPlus0=NA, bfMin0=NA)
@@ -1682,17 +1683,20 @@ CorrelationBayesian <- function(dataset=NULL, options, perform="run",
     #     #}
     #     methodNumber <- methodNumber+1
     # }
-    result <- .bfCorrieKernelKendallTau(n=n, tauObs=tauObs, kappa=kappa, var=var, ciValue=ciValue)
+    result <- .bfCorrieKernelKendallTau(n=n, tauObs=tauObs, kappa=kappa, var=var, ciValue=ciValue, xVals = xVals, 
+                                        yVals = yVals, useLatentNormalKendallTau=useLatentNormalKendallTau, 
+                                        tauSamplesNumber=tauSamplesNumber)
     result$call <- paste0(".bfKendallTau(n=", n, ", tauObs=", tauObs, ", kappa=", kappa, ", var=", var, ", ciValue=", ciValue, ")")
     result$stat <- tauObs
     return(result)
 }
 
-.bfCorrieKernelKendallTau <- function(n, tauObs, kappa=1, var=1, ciValue=0.95) {
+.bfCorrieKernelKendallTau <- function(n, tauObs, kappa=1, var=1, ciValue=0.95, xVals, yVals, useLatentNormalKendallTau, 
+                                      tauSamplesNumber) {
     tempList <- list(vector())
     result <- list(n=n, tauObs=tauObs, bf10=NA, bfPlus0=NA, bfMin0=NA, methodNumber=NA, betaA=NA, betaB=NA,
                    twoSidedTooPeaked=FALSE, plusSidedTooPeaked=FALSE, minSidedTooPeaked=FALSE,
-                   ci=tempList, ciValue=ciValue, acceptanceRate=1)
+                   ci=tempList, ciValue=ciValue, acceptanceRate=1, tauSamples=NULL)
 
     predictiveMatchingList <- list(bf10=1, bfPlus0=1, bfMin0=1, twoSidedTooPeaked=FALSE, plusSidedTooPeaked=FALSE, minSidedTooPeaked=FALSE, methodNumber=0)
 
@@ -1714,16 +1718,35 @@ CorrelationBayesian <- function(dataset=NULL, options, perform="run",
         result <- utils::modifyList(result, predictiveMatchingList)
         return(result)
     }
-
-    result$bf10 <- .priorTau(tauPop=0, kappa)/.posteriorTau(n=n, tauObs=tauObs, tauPop=0, kappa=kappa, var=var, test="two-sided")
-    result$bfPlus0 <- .priorTauPlus(tauPop=0, kappa)/.posteriorTau(n=n, tauObs=tauObs, tauPop=0, kappa=kappa, var=var, test="positive")
+    if (useLatentNormalKendallTau) {
+      sampleResult <- kendallGibbsSampler(xVals, yVals, nSamples = tauSamplesNumber)
+      tauSamples <- pearsonToKendall(sampleResult$rhoSamples)
+      
+      xxx <- (tauSamples + 1) / 2
+      someMean <- mean(xxx)
+      someVar <- var(xxx)
+      betaA <- someMean*(someMean*(1-someMean)/someVar-1)
+      betaB <- (1-someMean)*(someMean*(1-someMean)/someVar-1)
+      
+      result$tauSamples <- tauSamples
+      result$bf10 <- .scaledBetaTau(0) / .stretchedBeta(0, betaA, betaB) 
+    } else {
+      result$tauSamples <- 1:10
+      result$bf10 <- .scaledBetaTau(0) /.posteriorTau(n=n, tauObs=tauObs, tauPop=0, kappa=kappa, var=var, test="two-sided")
+    }
+    
+    result$bfPlus0 <- .priorTau(tauPop=0, kappa)/.posteriorTau(n=n, tauObs=tauObs, tauPop=0, kappa=kappa, var=var, test="positive")
     result$bfMin0 <- .priorTauMin(tauPop=0, kappa)/.posteriorTau(n=n, tauObs=tauObs, tauPop=0, kappa=kappa, var=var, test="negative")
     result$methodNumber <- 1
-
+    
     # Calculate credible intervals
-    if (!is.null(ciValue)) {
-        result$ci <- .computeKendallCredibleInterval(n=n, tauObs=tauObs, kappa=kappa, var=var, ciValue=ciValue)
+    if (!is.null(ciValue) & useLatentNormalKendallTau) {
+      twoSided <- quantile(tauSamples, c(0.025, 0.5, 0.975))
+      result$ci <- list(twoSided=twoSided, plusSided=twoSided, minSided=twoSided)
+    } else if (!is.null(ciValue)) {
+      result$ci <- .computeKendallCredibleInterval(n=n, tauObs=tauObs, kappa=kappa, var=var, ciValue=ciValue)
     }
+      
     return(result)
 }
 
@@ -2855,4 +2878,132 @@ CorrelationBayesian <- function(dataset=NULL, options, perform="run",
   if (line) {
     lines(x, predY, lwd=lwd)
   }
+}
+
+
+
+kendallGibbsSampler <- function(xVals, yVals, nSamples=1e4, progBar=FALSE, kappa=1,
+                                 alreadyRanked = FALSE) {
+  
+  if (progBar) {
+    myBar <- txtProgressBar(min = 1, max = nSamples, initial = 1, char = "*", 
+                            style = 3, width = 50)
+  }
+  
+  n <- length(xVals)
+  if(alreadyRanked == FALSE) {
+    xRanks <- rank(xVals)
+    yRanks <- rank(yVals)    
+  } else {
+    xRanks <- xVals
+    yRanks <- yVals    
+  }
+  
+  
+  # Target: posterior samples of rho
+  rhoSamples <- numeric(nSamples)
+  mySigma <- diag(2)
+  
+  # intitialise latent variables
+  # intialise rho that is compatible with xVals, yVals
+  #
+  currentXVals <- qnorm((xRanks)/(2*n+1))
+  currentYVals <- qnorm((yRanks)/(2*n+1))
+  currentRho <- cor(currentXVals, currentYVals)
+  
+  for (j in 1:nSamples) {
+    # Metropolis sampler: 
+    # currentXVals and currentYVals first get realigned with the underlying current rho
+    #
+    for (i in sample(1:n)) {
+      # Gibbs step go through pairs of z^{x}, z^{y} with current rho fixed
+      #   Thus, current is respect to the Gibbs step. Furthermore, 
+      #   here align latent variables to the rank
+      #
+      currentXRank <- xRanks[i]
+      currentYRank <- yRanks[i]
+      
+      regressXOnY <- mean(currentYVals[yRanks==currentYRank])
+      regressYOnX <- mean(currentXVals[xRanks==currentXRank])
+      
+      xBounds <- upperLowerTruncation(ranks=xRanks, values=currentXVals, currentRank=currentXRank, n=n)
+      currentXVals[i] <- myTruncNormSim(xBounds[["under"]], xBounds[["upper"]], mu=(currentRho*regressXOnY), sd=sqrt(1-currentRho^2))
+      
+      yBounds <- upperLowerTruncation(ranks=yRanks, values=currentYVals, currentRank=currentYRank, n=n)
+      currentYVals[i] <- myTruncNormSim(yBounds[["under"]], yBounds[["upper"]], mu=(currentRho*regressYOnX), sd=sqrt(1-currentRho^2))
+    }    
+    
+    currentXVals <- (currentXVals-mean(currentXVals))/sd(currentXVals)
+    currentYVals <- (currentYVals-mean(currentYVals))/sd(currentYVals)
+    
+    # This is the sufficient statistic to evaluate the likelihood part of the MH
+    rObs <- cor(currentXVals, currentYVals)
+    
+    # Do Metropolis step here
+    # vectorise the runif(1) < acceptance
+    chanceMechanism <- runif(nSamples)
+    
+    rhoNew <- metropolisOneStep(rhoCurrent=currentRho, rObs=rObs,n=n, alpha=1/kappa, 
+                                chanceMechanism[j])
+    
+    # Store MH update
+    rhoSamples[j] <- rhoNew # add proposal to samples if accepted
+    currentRho <- rhoNew # add proposal to samples if accepted
+    
+    if (progBar){setTxtProgressBar(myBar, j)}
+  }
+  
+  # rhoSamples <- pearsonToSpearman(rhoSamples) # Transform Pearson's rho to Spearman's rho
+  resultsList <- list(rhoSamples = rhoSamples)
+  return(resultsList)
+}
+
+metropolisOneStep <- function (rhoCurrent, rObs, n, alpha=1, chanceMechanism) {
+  # chanceMechanism is runif(1) vectorised
+  # 
+  zCurrent <- atanh(rhoCurrent)
+  zCandidate <- rnorm(1, mean=atanh(rhoCurrent), sd=1/sqrt(n-3))
+  rhoCandidate <- tanh(zCandidate)
+  
+  logAcceptance <- (alpha-n/2)*(log(1-rhoCandidate^2)-log(1-rhoCurrent^2))+
+    n*((1-rhoCurrent*rObs)/(1-rhoCurrent^2)-(1-rhoCandidate*rObs)/(1-rhoCandidate^2))
+  
+  if (chanceMechanism <= exp(logAcceptance)) {
+    return(rhoCandidate)
+  } else {
+    return(rhoCurrent)
+  }
+}
+
+
+upperLowerTruncation <- function(ranks, values, currentRank, n, ranksAreIndices = FALSE) {
+  
+  if (currentRank == min(ranks)) {
+    under <- -Inf
+  } else {
+    under <- max(values[ranks < currentRank])
+  }
+  
+  if (currentRank == max(ranks)) {
+    upper <- Inf
+  } else {
+    upper <- min(values[ranks > currentRank])
+  }
+  
+  return(list(under=under, upper=upper))
+}
+
+myTruncNormSim <- function(lBound = -Inf, uBound = Inf, mu = 0, sd = 1){
+  
+  lBoundUni <- pnorm(lBound, mean = mu, sd = sd)
+  uBoundUni <- pnorm(uBound, mean = mu, sd = sd)  
+  mySample <- qnorm(runif(1, lBoundUni, uBoundUni), mean = mu, sd = sd)
+  
+  return(mySample)
+}
+
+
+pearsonToKendall <- function(rho){
+  myTau <- (2/pi)* asin(rho)
+  return(myTau)
 }

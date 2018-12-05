@@ -257,7 +257,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 
 		if (options$plotPriorAndPosterior) {
 
-			if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE
+			if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE
 				&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$plotWidth == FALSE && diff$plotHeight == FALSE)) && options$plotPriorAndPosteriorAdditionalInfo && "posteriorPlotAddInfo" %in% state$plotTypes) {
 
 				# if there is state and the variable has been plotted before and there is either no difference or only the variables or requested plot types have changed
@@ -267,7 +267,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 
 				plots.correlation[[length(plots.correlation)+1]] <- state$plotsCorrelation[[stateIndex]]
 
-			} else if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE
+			} else if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE
 						&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$plotWidth == FALSE && diff$plotHeight == FALSE)) && !options$plotPriorAndPosteriorAdditionalInfo && "posteriorPlot" %in% state$plotTypes) {
 
 				# if there is state and the variable has been plotted before and there is either no difference or only the variables or requested plot types have changed
@@ -291,7 +291,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 				# plot[["data"]] <- .endSaveImage(image)
 
 				.plotFunc <- function() {
-					.plotPosterior.correlation(n=NULL, r=NULL, oneSided=oneSided, dontPlotData=TRUE, addInformation=options$plotPriorAndPosteriorAdditionalInfo, corCoefficient=options$corcoefficient)
+					.plotPosterior.correlation(n=NULL, r=NULL, oneSided=oneSided, dontPlotData=TRUE, addInformation=options$plotPriorAndPosteriorAdditionalInfo, corCoefficient=options$corcoefficient, tauSamples=NULL)
 				}
 				content <- .writeImage(width = 530, height = 400, plot = .plotFunc, obj = TRUE)
 				plot[["convertible"]] <- TRUE
@@ -322,7 +322,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 				stateIndex <- which(state$plotPairs == currentPair & state$plotTypes == "robustnessPlotAddInfo")[1]
 
 				plots.correlation[[length(plots.correlation)+1]] <- state$plotsCorrelation[[stateIndex]]
-			} else if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE
+			} else if (!is.null(state) && currentPair %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE
 				&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$plotWidth == FALSE && diff$plotHeight == FALSE)) && !options$plotBayesFactorRobustnessAdditionalInfo &&
 				"robustnessPlot" %in% state$plotTypes) {
 				#
@@ -425,7 +425,8 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 	rs <- numeric()
 	ns <- numeric()
 	BF10post <- numeric()
-
+	tauSamplesList <- list()
+	
 	for (i in .indices(options$pairs)) {
 	    index <- NULL
 	    pair <- options$pairs[[i]]
@@ -440,7 +441,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 		} else {
 		    if (perform == "init") {
 		        if (!is.null(state) && tablePairs[[i]] %in% state$tablePairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE
-					&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$corcoefficient == FALSE))) {
+					&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE))) {
 
 		            stateIndex <- which(state$tablePairs == paste(pair, collapse=" - "))[1]
 		            pairStatuses[[i]] <- state$pairStatuses[[stateIndex]]
@@ -463,7 +464,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 				unplotableMessageScatter <- NULL
 
 				if (!is.null(state) && tablePairs[[i]] %in% state$tablePairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE
-					&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$corcoefficient == FALSE))) {
+					&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE))) {
 
 					stateIndex <- which(state$tablePairs == paste(pair, collapse=" - "))[1]
 
@@ -481,6 +482,8 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 					BF10post[i] <- state$BF10post[stateIndex]
 					rs[i] <- state$rs[stateIndex]
 					ns[i] <- state$ns[stateIndex]
+					tauSamplesList[[i]] <- state$tauSamplesList[[stateIndex]]
+					
 				} else {
 				    # Data checks TODOTODO: This works well for list wise
 				    errorMessage <- NULL
@@ -552,7 +555,9 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 					        bfObject <- .bfPearsonCorrelation(n=nObs, r=rObs, kappa=options$priorWidth, ciValue=options$ciValue)
 					    } else if (useKendall) {
 					        # TODO Johnny I removed var=1 as default etc
-					        bfObject <- .bfKendallTau(n=nObs, tauObs=rObs, kappa=options$priorWidth, ciValue=options$ciValue)
+					        bfObject <- .bfKendallTau(n=nObs, tauObs=rObs, kappa=options$priorWidth, ciValue=options$ciValue, 
+					                                  xVals = v1, yVals = v2, useLatentNormalKendallTau=options$useLatentNormalKendallTau, 
+					                                  tauSamplesNumber = options$tauSamplesNumber)
 					    }
 					}
 
@@ -561,6 +566,11 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 					#
 					rs[i] <- bfObject$stat
 					ns[i] <- bfObject$n
+					if (useKendall & options$useLatentNormalKendallTau) {
+					  tauSamplesList[[i]] <- bfObject$tauSamples
+					} else {
+					  tauSamplesList[[i]] <- runif(1e3)
+					}
 
 					# Extract infor from bfObject
 					#
@@ -665,6 +675,8 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 				v1 <- NULL
 				v2 <- NULL
 			}
+			
+		  # tauSamples <- tauSamplesList[[i]]
 
 			if (perform == "run" && status$unplotableScatter == FALSE) {
 
@@ -745,7 +757,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 
 			if (options$plotPriorAndPosterior) {
 
-				if (!is.null(state) && tablePairs[[i]] %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE
+				if (!is.null(state) && tablePairs[[i]] %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE
 					&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$plotWidth == FALSE && diff$plotHeight == FALSE)) && options$plotPriorAndPosteriorAdditionalInfo && "posteriorPlotAddInfo" %in% state$plotTypes) {
 
 					# if there is state and the variable has been plotted before and there is either no difference or only the variables or requested plot types have changed
@@ -755,7 +767,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 
 					plots.correlation[[j]] <- state$plotsCorrelation[[stateIndex]]
 
-				} else if (!is.null(state) && tablePairs[[i]] %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE
+				} else if (!is.null(state) && tablePairs[[i]] %in% state$plotPairs && !is.null(diff) && (is.list(diff) && (diff$priorWidth == FALSE && diff$hypothesis == FALSE && diff$corcoefficient == FALSE && diff$useLatentNormalKendallTau == FALSE && diff$tauSamplesNumber == FALSE
 							&& diff$bayesFactorType == FALSE && diff$missingValues == FALSE && diff$plotWidth == FALSE && diff$plotHeight == FALSE)) && !options$plotPriorAndPosteriorAdditionalInfo && "posteriorPlot" %in% state$plotTypes) {
 
 					# if there is state and the variable has been plotted before and there is either no difference or only the variables or requested plot types have changed
@@ -784,7 +796,10 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 							#
 							# plot[["data"]] <- .endSaveImage(image)
 							.plotFunc <- function() {
-								.plotPosterior.correlation(r=rs[i], n=ns[i], oneSided=oneSided, BF=plotBF10post, BFH1H0=BFH1H0, addInformation=options$plotPriorAndPosteriorAdditionalInfo, kappa=options$priorWidth,corCoefficient=options$corcoefficient)
+								.plotPosterior.correlation(r=rs[i], n=ns[i], oneSided=oneSided, BF=plotBF10post, BFH1H0=BFH1H0, 
+								                           addInformation=options$plotPriorAndPosteriorAdditionalInfo, 
+								                           kappa=options$priorWidth,corCoefficient=options$corcoefficient,
+								                           tauSamples = tauSamplesList[[i]], useLatentNormalKendallTau=options$useLatentNormalKendallTau)
 							}
 							content <- .writeImage(width = 530, height = 400, plot = .plotFunc, obj = TRUE)
 							plot[["convertible"]] <- TRUE
@@ -1054,7 +1069,7 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 }
 
 .plotPosterior.correlation <- function(n, r, kappa=1, oneSided= FALSE, BF, BFH1H0, addInformation= TRUE, dontPlotData=FALSE, lwd= 2,corCoefficient="Pearson",
-										cexPoints= 1.5, cexAxis= 1.2, cexYlab= 1.5, cexXlab= 1.5, cexTextBF= 1.4, cexCI= 1.1, cexLegend= 1.2, lwdAxis= 1.2) {
+										cexPoints= 1.5, cexAxis= 1.2, cexYlab= 1.5, cexXlab= 1.5, cexTextBF= 1.4, cexCI= 1.1, cexLegend= 1.2, lwdAxis= 1.2, tauSamples=NULL, useLatentNormalKendallTau=FALSE) {
 
   useKendall <- corCoefficient == "Kendall"
   usePearson <- corCoefficient == "Pearson"
@@ -1193,10 +1208,16 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 	if (useKendall) {
 	  betaApproximation <- FALSE
 	    if (oneSided == FALSE) {
-	    ci <- .credibleIntervalKendallTau(n=n, tauObs=r, ciValue = 0.95, kappa=kappa, test="two-sided")
-	    CIlow <- ci[[1]]
-	    medianPosterior <- ci[[2]]
-	    CIhigh <- ci[[3]]
+	      
+	      if (useLatentNormalKendallTau) {
+	        ci <- quantile(tauSamples, c(0.025, 0.5, 0.975))
+	      } else {
+	        ci <- .credibleIntervalKendallTau(n=n, tauObs=r, ciValue = 0.95, kappa=kappa, test="positive")
+	      }
+	      
+        CIlow <- ci[[1]]
+        medianPosterior <- ci[[2]]
+        CIhigh <- ci[[3]]
 
 	  } else if (oneSided == "right") {
 	    ci <- .credibleIntervalKendallTau(n=n, tauObs=r, ciValue = 0.95, kappa=kappa, test="positive")
@@ -1220,8 +1241,18 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 	  if (oneSided == FALSE) {
 
 	    priorLine <- .priorTau(tauPop=rho, kappa=kappa)
-	    posteriorLine <- .posteriorTau(n=n, tauObs=r, tauPop=rho, kappa=kappa, var=1, test="two-sided" )
-
+	    if (useLatentNormalKendallTau) {
+	      xxx <- (tauSamples + 1) / 2
+  	    someMean <- mean(xxx)
+  	    someVar <- var(xxx)
+  	    betaA <- someMean*(someMean*(1-someMean)/someVar-1)
+  	    betaB <- (1-someMean)*(someMean*(1-someMean)/someVar-1)
+  	    posteriorLine <- .stretchedBeta(alpha=betaA, beta=betaB, rho =  rho)
+	    } else {
+	      posteriorLine <- .posteriorTau(n=n, tauObs=r, tauPop=rho, kappa=kappa, var=1, test="two-sided" )
+	    }
+	    
+	    
 	    if (sum(is.na(posteriorLine)) > 1 || any(posteriorLine < 0) || any(is.infinite(posteriorLine))) {
         stop("Posterior is too peaked")
 	    }
@@ -1315,8 +1346,12 @@ CorrelationBayesianPairs <- function(dataset=NULL, options, perform="run", callb
 		    points(0, .priorRho(rho=0, kappa=kappa), col="black", pch=21, bg="grey", cex=cexPoints)
 		    points(1e-15, .posteriorRho(rho=1e-8, n=n, r=r, kappa=kappa), col="black", pch=21, bg="grey", cex=cexPoints)
 		} else if (useKendall) {
+		  if (useLatentNormalKendallTau) {
+		    points(0, .stretchedBeta(alpha=betaA, beta=betaB, rho=0), col="black", pch=21, bg="grey", cex=cexPoints)
+		  } else {
 		    points(1e-15, .posteriorTau(n=n, tauObs=r, tauPop=1e-8, kappa=kappa), col="black", pch=21, bg = "grey", cex= cexPoints)
-		    points(0, .priorTau(tauPop=0, kappa=kappa), col="black", pch=21, bg="grey", cex=cexPoints)
+		  }
+		  points(0, .priorTau(tauPop=0, kappa=kappa), col="black", pch=21, bg="grey", cex=cexPoints)
 		}
 	}
 

@@ -96,6 +96,18 @@
 			"value": 0.950,
 			"min": 0.001,
 			"max": 0.999
+		},
+		{
+			"default": false,
+			"name": "useLatentNormalKendallTau",
+			"type": "Boolean"
+		},
+		{
+			"default": 3000,
+			"name": "tauSamplesNumber",
+			"type": "Integer",
+			"min": 100,
+			"max": 50000
 		}
 	]
 }

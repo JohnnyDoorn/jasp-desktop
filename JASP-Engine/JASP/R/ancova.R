@@ -219,18 +219,34 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 .anovaCheckErrors <- function(dataset, options, ready) {
   if (!ready) return()
 
-  factorModelTerms <- options$modelTerms[!unlist(options$modelTerms) %in% options$covariates]
+  modelTerms <- unlist(options$modelTerms, recursive = FALSE)
+  factorModelTerms <- options$modelTerms[sapply(modelTerms, function(x) !any(x %in% options$covariates))]
   
   for(i in length(factorModelTerms):1) {
     .hasErrors(
       dataset = dataset, 
       type = c('observations', 'variance', 'infinity', 'factorLevels'),
-      all.target = options$dependent, 
+      all.target = c(options$dependent, options$covariates), 
       all.grouping = factorModelTerms[[i]][['components']],
       factorLevels.amount  = "< 2",
       observations.amount = paste("<", length(options$dependent)+1), 
       exitAnalysisIfErrors = TRUE)
   }
+  
+  for(i in length(factorModelTerms):1) {
+    .hasErrors(
+      dataset = dataset, 
+      type = c('infinity', 'factorLevels'),
+      all.target = factorModelTerms[[i]][['components']], 
+      factorLevels.amount  = "< 2",
+      exitAnalysisIfErrors = TRUE)
+  }
+  
+  .hasErrors(
+    dataset = dataset, 
+    type = c('infinity'),
+    all.target = options$wlsWeights,
+    exitAnalysisIfErrors = TRUE)
   
   .hasErrors(dataset = dataset, 
              custom = function() {
@@ -380,7 +396,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     result <- car::Anova(model, type=3, singular.ok=FALSE)
     result <- result[-1, ]
     result['Mean Sq'] <- result[['Sum Sq']] / result[['Df']]
-    result['SSt'] <- sum(result[-1, "Sum Sq"], na.rm = TRUE)
+    result['SSt'] <- sum(result["Sum Sq"], na.rm = TRUE)
     
   }
 
@@ -396,10 +412,11 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       SSr <- result["Residuals", "Sum Sq"]
       MSr <- SSr/result["Residuals", "Df"]
       
-      eta <- result[, 'Sum Sq'] / result[, 'SSt']
-      etaPart <- result[, 'Sum Sq'] / (result[, 'Sum Sq'] + SSr)
-      omega <- (result[, 'Sum Sq'] - (result[, 'Df'] * MSr)) / (SSt + MSr)
-
+      eta <- result[['Sum Sq']] / result[['SSt']]
+      etaPart <- result[['Sum Sq']] / (result[['Sum Sq']] + SSr)
+      omega <- (result[['Sum Sq']] - (result[['Df']] * MSr)) / (SSt + MSr)
+      omega <- sapply(omega[,1], function(x) max(x, 0))
+      
       result[, c("eta", "etaPart", "omega")] <- cbind(eta, etaPart, omega)
       result["Residuals", c("eta", "etaPart", "omega")] <- NA
       
@@ -663,7 +680,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
         thisContrastResult[["p"]] <- p
         
       }
-  
+
       # For grouping by letters
       # p <- thisContrastResult[["p"]]
       # names(p) <- thisContrastResult[["Comparison"]]
@@ -734,7 +751,9 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   postHocStandardContainer <- createJaspContainer(title = "Standard")
   postHocStandardContainer$dependOn(c("postHocTestsVariables", "postHocTestEffectSize", "postHocTestsBonferroni", 
-                              "postHocTestsHolm", "postHocTestsScheffe", "postHocTestsTukey", "postHocTestsSidak"))
+                              "postHocTestsHolm", "postHocTestsScheffe", "postHocTestsTukey", "postHocTestsSidak",
+                              "postHocGroupByLetters"))
+  
   postHocContainer[["postHocStandardContainer"]] <- postHocStandardContainer
   
   postHocVariables <- unlist(options$postHocTestsVariables, recursive = FALSE)
@@ -751,10 +770,12 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     postHocRef <- emmeans::lsmeans(model, postHocVariablesListV)
     
     postHocCorrections <- c("tukey", "scheffe", "bonferroni", "holm", "sidak")
-    
+
     resultPostHoc <- lapply(postHocCorrections, function(x)
       summary(emmeans::contrast(postHocRef[[postHocVarIndex]], method = "pairwise"), 
               adjust = x, infer = c(TRUE, TRUE)))
+    
+    allContrasts <- strsplit(as.character(resultPostHoc[[1]]$contrast), split = " - ")
     
     if (options$confidenceIntervalsPostHoc & nrow(resultPostHoc[[1]]) > 1)
       postHocStandardContainer[[thisVarName]]$addFootnote(
@@ -768,24 +789,37 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     # Calculate effect sizes
     if (options$postHocTestEffectSize & nrow(dataset) > 0 & !interactionTerm) {
       
-      allContrasts <- strsplit(as.character(resultPostHoc[[1]]$contrast), split = " - ")
       den <- numeric(length(allContrasts))
       
       for(i in 1:length(allContrasts)) {
         x <- dataset[(dataset[.v(thisVarName)] == allContrasts[[i]][1]), .v(options$dependent)]
-        y <- dataset[(dataset[.v(thisVarName)] == allContrasts[[i]][1]), .v(options$dependent)]
+        y <- dataset[(dataset[.v(thisVarName)] == allContrasts[[i]][2]), .v(options$dependent)]
         n1 <- length(x)
         n2 <- length(y)
         den[i] <- sqrt(((n1 - 1) * var(x) + (n2 - 1) * var(y)) / (n1 + n2 - 2))
       }
       resultPostHoc[[1]][["cohenD"]] <- resultPostHoc[[1]][["estimate"]] / den 
+      postHocStandardContainer[[thisVarName]]$addFootnote("Cohen's d does not correct for multiple comparisons.")
     }
 
     allPvalues <- do.call(cbind, lapply(resultPostHoc, function(x) x$p.value))
     colnames(allPvalues) <- postHocCorrections
     resultPostHoc <- cbind(resultPostHoc[[1]], allPvalues)
+    
+    resultPostHoc[["contrast_A"]] <- do.call(rbind, allContrasts)[, 1]
+    resultPostHoc[["contrast_B"]] <- do.call(rbind, allContrasts)[, 2]
 
     postHocStandardContainer[[thisVarName]]$setData(resultPostHoc)
+    
+    if (options$postHocGroupByLetters) {
+      p <- resultPostHoc[["p.value"]]
+      names(p) <- resultPostHoc[["contrast"]]
+      lettersResult <- multcompView::multcompLetters(p)$Letters
+      lettersResult <- data.frame(group = names(lettersResult), letter = lettersResult)
+      
+      letterTableName <- paste0("Letter Summary - ", thisVarName)
+      postHocStandardContainer[[letterTableName]] <- createJaspTable(title = letterTableName, data = lettersResult)
+    }   
     
     
     if (options$postHocTestsBootstrapping) {
@@ -798,7 +832,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       bootStrapTable$addFootnote(message = paste0("Bootstrapping based on ", 
                                                   options[['postHocTestsBootstrappingReplicates']], " replicates."))
       bootStrapTable$addFootnote(message = "Mean Difference estimate is based on the median of the bootstrap distribution.")
-      # bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
+      bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
       
       startProgressbar(options[["postHocTestsBootstrappingReplicates"]])
       
@@ -849,12 +883,20 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   preTitle <- if (!makeBootstrapTable) "Post Hoc Comparisons - " else "Bootstrapped Post Hoc Comparisons - "
   postHocTable <- createJaspTable(title = paste0(preTitle, myTitle))
   
-  postHocTable$addColumnInfo(name="contrast", title="Comparison", type="string")
+  # postHocTable$addColumnInfo(name="contrast", title="Comparison", type="string")
+  postHocTable$addColumnInfo(name="contrast_A", title=" ", type="string", combine = TRUE)
+  postHocTable$addColumnInfo(name="contrast_B", title=" ", type="string")
+  
   postHocTable$addColumnInfo(name="estimate", title="Mean Difference", type="number")
   
   if (options$confidenceIntervalsPostHoc || makeBootstrapTable) {
     
-    thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% CI for Mean Difference")
+    if (makeBootstrapTable) {
+      thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% bca\u002A CI")
+    } else {
+      thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% CI for Mean Difference")
+    }
+    
     postHocTable$addColumnInfo(name="lower.CL", type = "number", title = "Lower",
                                overtitle = thisOverTitle)
     postHocTable$addColumnInfo(name="upper.CL", type = "number", title = "Upper",
@@ -1224,7 +1266,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     return ()
   
   leveneTable <- createJaspTable(title = "Test for Equality of Variances (Levene's)")
-  
+
   leveneTable$addColumnInfo(name="F", type="number")
   leveneTable$addColumnInfo(name="df1", type="number")
   leveneTable$addColumnInfo(name="df2", type="number")
@@ -1232,8 +1274,8 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   
   if (options$VovkSellkeMPR) {
-    table$addColumnInfo(title = "VS-MPR\u002A", name = "VovkSellkeMPR", type = "number")
-    table$addFootnote(message = .messages("footnote", "VovkSellkeMPR"), symbol = "\u002A")
+    leveneTable$addColumnInfo(title = "VS-MPR\u002A", name = "VovkSellkeMPR", type = "number")
+    leveneTable$addFootnote(message = .messages("footnote", "VovkSellkeMPR"), symbol = "\u002A")
   }
   
   leveneTable$showSpecifiedColumnsOnly <- TRUE
@@ -1266,7 +1308,8 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     return()
 
   marginalMeansContainer <- createJaspContainer(title = "Marginal Means")
-  marginalMeansContainer$dependOn(c("marginalMeansTerms",  "marginalMeansCompareMainEffects", "marginalMeansCIAdjustment"))
+  marginalMeansContainer$dependOn(c("marginalMeansTerms",  "marginalMeansCompareMainEffects", "marginalMeansCIAdjustment",
+                                    "marginalMeansBootstrapping", "marginalMeansBootstrappingReplicates"))
   
   anovaContainer[["marginalMeansContainer"]] <- marginalMeansContainer
   
@@ -1282,8 +1325,12 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     
     marginalMeansTable$addColumnInfo(name="lsmean", title="Marginal Mean", type="number")
 
+    if (makeBootstrapTable) {
+      thisOverTitle <- paste0("95% bca\u002A CI")
+    } else {
+      thisOverTitle <- paste0("95% CI for Mean Difference")
+    }
 
-    thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% CI for Marginal Mean")
     marginalMeansTable$addColumnInfo(name="lower.CL", type = "number", title = "Lower",
                                 overtitle = thisOverTitle, )
     marginalMeansTable$addColumnInfo(name="upper.CL", type = "number", title = "Upper",
@@ -1390,7 +1437,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       bootStrapTable$addFootnote(message = paste0("Bootstrapping based on ", 
                                                   options[['marginalMeansBootstrappingReplicates']], " replicates."))
       bootStrapTable$addFootnote(message = "Marginal Means estimate is based on the median of the bootstrap distribution.")
-      # bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
+      bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
       
       startProgressbar(options[["marginalMeansBootstrappingReplicates"]])
 

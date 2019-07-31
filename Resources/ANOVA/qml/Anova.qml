@@ -39,7 +39,19 @@ Form
 		AssignedVariablesList { name: "randomFactors";	title: qsTr("Random Factors");		suggestedColumns: ["ordinal", "nominal"];	debug: true }
 		AssignedVariablesList { name: "wlsWeights";		title: qsTr("WLS Weights");			suggestedColumns: ["scale"]; singleVariable: true		}
 	}
-	
+	Group
+	{
+		title: qsTr("Display")
+		CheckBox { name: "descriptives";	label: qsTr("Descriptive statistics")	}
+		CheckBox {
+			name: "effectSizeEstimates";	label: qsTr("Estimates of effect size")
+			columns: 3
+			CheckBox { name: "effectSizeEtaSquared";		label: qsTr("η²"); checked: true	}
+			CheckBox { name: "effectSizePartialEtaSquared";	label: qsTr("partial η²")		}
+			CheckBox { name: "effectSizeOmegaSquared";		label: qsTr("ω²")				}
+		}
+		CheckBox { name: "VovkSellkeMPR"; label: qsTr("Vovk-Sellke maximum p-ratio") }
+	}
 	Section
 	{
 		title: qsTr("Model")
@@ -134,8 +146,13 @@ Form
             }
         }
 
-        CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect Size") }
-
+		Group
+		{
+			title: qsTr("Display")
+			CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect size") }
+			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
+		}
+	
 		Group
 		{
 			title: qsTr("Correction")
@@ -192,13 +209,13 @@ Form
 	
 	Section
 	{
-		title: qsTr("Additional Options")
+		title: qsTr("Marginal Means")
 		columns: 1
 		
 		VariablesForm
 		{
 			height: 200
-			AvailableVariablesList { name: "marginalMeansTermsAvailable"; title: qsTr("Marginal Means"); source: "modelTerms" }
+			AvailableVariablesList { name: "marginalMeansTermsAvailable"; source: "modelTerms" }
 			AssignedVariablesList {  name: "marginalMeansTerms" }
 		}
 
@@ -231,19 +248,6 @@ Form
 			}
 		}
 		
-		Group
-		{
-			title: qsTr("Display")
-			CheckBox { name: "descriptives";	label: qsTr("Descriptive statistics")	}
-			CheckBox {
-				name: "effectSizeEstimates";	label: qsTr("Estimates of effect size")
-				columns: 3
-				CheckBox { name: "effectSizeEtaSquared";		label: qsTr("η²"); checked: true	}
-				CheckBox { name: "effectSizePartialEtaSquared";	label: qsTr("partial η²")		}
-				CheckBox { name: "effectSizeOmegaSquared";		label: qsTr("ω²")				}
-			}
-			CheckBox { name: "VovkSellkeMPR"; label: qsTr("Vovk-Sellke maximum p-ratio") }
-		}
 	}
 	
 	Section

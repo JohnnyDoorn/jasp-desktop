@@ -69,7 +69,21 @@ Form
 			suggestedColumns: ["scale"]
 		}
 	}
-	
+			
+	Group
+	{
+		title: qsTr("Display")
+		CheckBox { name: "descriptives"; label: qsTr("Descriptive statistics") }
+		CheckBox
+		{
+			name: "effectSizeEstimates"; label: qsTr("Estimates of effect size")
+			columns: 3
+			CheckBox { name: "effectSizeEtaSquared";		label: qsTr("η²"); checked: true	}
+			CheckBox { name: "effectSizePartialEtaSquared";	label: qsTr("partial η²")		}
+			CheckBox { name: "effectSizeOmegaSquared";		label: qsTr("ω²")				}
+		}
+		CheckBox { name: "VovkSellkeMPR"; label: qsTr("Vovk-Sellke maximum p-ratio") }
+	}
 	
 	Section
 	{
@@ -156,8 +170,12 @@ Form
                 }
             }
         }
-
-		CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect size") }
+		Group
+		{
+			title: qsTr("Display")
+			CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect size") }
+			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
+		}
 		
 		Group
 		{
@@ -214,29 +232,29 @@ Form
 	
 	Section
 	{
-		title: qsTr("Additional Options")
+		title: qsTr("Marginal Means")
 		columns: 1
 		
 		VariablesForm
 		{
 			height: 200
-			AvailableVariablesList { name: "marginalMeansTermsAvailable"; title: qsTr("Marginal Means"); source: [{ name: "modelTerms", discard: "covariates" }] }
-			AssignedVariablesList {	 name: "marginalMeansTerms" }
+			AvailableVariablesList { name: "marginalMeansTermsAvailable"; source: [{ name: "modelTerms", discard: "covariates" }] }
+			AssignedVariablesList {	 name: "marginalMeansTerms"  }
 		}
 		
-        CheckBox
-        {
-            name: "marginalMeansBootstrapping"; label: qsTr("From")
-            childrenOnSameRow: true
-            IntegerField
-            {
-                name: "marginalMeansBootstrappingReplicates"
-                defaultValue: 1000
-                fieldWidth: 50
-                min: 100
-                afterLabel: qsTr("bootstraps")
-            }
-        }
+		CheckBox
+		{
+		    name: "marginalMeansBootstrapping"; label: qsTr("From")
+		    childrenOnSameRow: true
+		    IntegerField
+		    {
+		        name: "marginalMeansBootstrappingReplicates"
+		        defaultValue: 1000
+		        fieldWidth: 50
+		        min: 100
+		        afterLabel: qsTr("bootstraps")
+		    }
+		}
 
 		CheckBox
 		{
@@ -252,21 +270,7 @@ Form
 				]
 			}
 		}
-		
-		Group
-		{
-			title: qsTr("Display")
-			CheckBox { name: "descriptives"; label: qsTr("Descriptive statistics") }
-			CheckBox
-			{
-				name: "effectSizeEstimates"; label: qsTr("Estimates of effect size")
-				columns: 3
-				CheckBox { name: "effectSizeEtaSquared";		label: qsTr("η²"); checked: true	}
-				CheckBox { name: "effectSizePartialEtaSquared";	label: qsTr("partial η²")		}
-				CheckBox { name: "effectSizeOmegaSquared";		label: qsTr("ω²")				}
-			}
-			CheckBox { name: "VovkSellkeMPR"; label: qsTr("Vovk-Sellke maximum p-ratio") }
-		}
+
 	}
 	
 	Section

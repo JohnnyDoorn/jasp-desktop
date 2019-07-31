@@ -1295,7 +1295,8 @@
     plotErrorBars <- options$plotCredibleInterval
     errorBarType  <- "confidenceInterval"
     conf.interval <- options$plotCredibleIntervalInterval
-    descriptivesPlotContainer$dependOn(c("dependent", "plotCredibleInterval", "plotCredibleIntervalInterval"))
+    descriptivesPlotContainer$dependOn(c("dependent", "plotCredibleInterval", "plotCredibleIntervalInterval",
+                                         "plotErrorBars", "errorBarType"))
 
   } else {
     plotErrorBars <- options$plotErrorBars

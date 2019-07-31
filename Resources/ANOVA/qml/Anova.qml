@@ -22,7 +22,7 @@ import JASP.Widgets 1.0
 
 Form
 {
-	usesJaspResults: false
+	usesJaspResults: true
 	
 	IntegerField { visible: false; name: "plotWidthQQPlot"                      ; defaultValue: 300 }
 	IntegerField { visible: false; name: "plotHeightQQPlot"                     ; defaultValue: 300 }
@@ -72,13 +72,13 @@ Form
 		Group
 		{
 			CheckBox { name: "homogeneityTests";	label: qsTr("Homogeneity tests")			}
-			CheckBox
+			Group
 			{
-				name: "homogeneityCorrections";		label: qsTr("Homogeneity corrections")
+				title: qsTr("Homogeneity corrections")
 				columns: 3
 				CheckBox { name: "homogeneityNone";		label: qsTr("None")           ; checked: true }
-				CheckBox { name: "homogeneityBrown";	label: qsTr("Brown-Forsythe") ; checked: true }
-				CheckBox { name: "homogeneityWelch";	label: qsTr("Welch")          ; checked: true }
+				CheckBox { name: "homogeneityBrown";	label: qsTr("Brown-Forsythe") ; checked: false }
+				CheckBox { name: "homogeneityWelch";	label: qsTr("Welch")          ; checked: false }
 			}
 			CheckBox { name: "qqPlot"; label: qsTr("Q-Q plot of residuals") }
 		}
@@ -268,7 +268,7 @@ Form
 		{
 			height: 170
 			AvailableVariablesList { name: "kruskalVariablesAvailable"; title: qsTr("Kruskal-Wallis Test"); source:  ["fixedFactors", "randomFactors"] }
-			AssignedVariablesList {  name: "kruskalVariablesAssigned" }
+			AssignedVariablesList {	name: "kruskalVariablesAssigned"; title: qsTr(" ") }
 		}
 	}	
 }

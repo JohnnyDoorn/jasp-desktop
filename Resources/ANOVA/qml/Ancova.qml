@@ -22,7 +22,7 @@ import JASP.Widgets 1.0
 
 Form
 {
-	usesJaspResults: false
+	usesJaspResults: true
 	
 	IntegerField { visible: false; name: "plotWidthQQPlot"                      ; defaultValue: 300 }
 	IntegerField { visible: false; name: "plotHeightQQPlot"                     ; defaultValue: 300 }
@@ -294,7 +294,7 @@ Form
 			{
 				height: 200
 				AvailableVariablesList { name: "kruskalVariablesAvailable"; title: qsTr("Kruskal-Wallis Test"); source: "fixedFactors" }
-				AssignedVariablesList {	name: "kruskalVariablesAssigned" }
+				AssignedVariablesList {	name: "kruskalVariablesAssigned"; title: qsTr(" ") }
 			}
 		}
 		

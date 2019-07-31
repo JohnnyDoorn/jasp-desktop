@@ -1262,7 +1262,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 }
 
 .anovaMarginalMeans <- function(anovaContainer, dataset, options, ready) {
-  if (!is.null(anovaContainer[["marginalMeansContainer"]]) || is.null(options$marginalMeansTerms) || !ready)
+  if (!is.null(anovaContainer[["marginalMeansContainer"]]) || length(options$marginalMeansTerms) == 0 || !ready)
     return()
 
   marginalMeansContainer <- createJaspContainer(title = "Marginal Means")

@@ -123,36 +123,43 @@ Form
 
 		}
 
-        Group
-        {
-            CheckBox
-            {
-                name: "confidenceIntervalsPostHoc"; label: qsTr("Confidence intervals")
-                childrenOnSameRow: true
-                CIField {name: "confidenceIntervalIntervalPostHoc" }
-            }
-            CheckBox
-            {
-                name: "postHocTestsBootstrapping"; label: qsTr("From")
-                childrenOnSameRow: true
-                IntegerField
-                {
-                    name: "postHocTestsBootstrappingReplicates"
-                    defaultValue: 1000
-                    fieldWidth: 50
-                    min: 100
-                    afterLabel: qsTr("bootstraps")
-                }
-            }
-        }
 
 		Group
 		{
-			title: qsTr("Display")
-			CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect size") }
-			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
+			title: qsTr("Type")
+			CheckBox 
+			{ 
+			name: "postHocTestsTypeStandard";	label: qsTr("Standard"); checked: true	
+			Group
+			{
+	            		CheckBox
+				{
+				name: "confidenceIntervalsPostHoc"; label: qsTr("Confidence intervals")
+				childrenOnSameRow: true
+				CIField {name: "confidenceIntervalIntervalPostHoc" }
+				 }
+				 CheckBox
+				 {
+					name: "postHocTestsBootstrapping"; label: qsTr("From")
+					childrenOnSameRow: true
+					IntegerField
+					{
+					    name: "postHocTestsBootstrappingReplicates"
+					    defaultValue: 1000
+					    fieldWidth: 50
+					    min: 100
+					    afterLabel: qsTr("bootstraps")
+					}
+				    }
+				}
+				CheckBox { name: "postHocTestEffectSize";	label: qsTr("Effect size") }
+			}
+			CheckBox { name: "postHocTestsTypeGames";		label: qsTr("Games-Howell")				}
+			CheckBox { name: "postHocTestsTypeDunnett";		label: qsTr("Dunnett")					}
+			CheckBox { name: "postHocTestsTypeDunn";		label: qsTr("Dunn")						}
 		}
-	
+		
+
 		Group
 		{
 			title: qsTr("Correction")
@@ -160,18 +167,15 @@ Form
 			CheckBox { name: "postHocTestsScheffe";		label: qsTr("Scheffe")				}
 			CheckBox { name: "postHocTestsBonferroni";	label: qsTr("Bonferroni")			}
 			CheckBox { name: "postHocTestsHolm";		label: qsTr("Holm")					}
-            CheckBox { name: "postHocTestsSidak";       label: qsTr("Šidák")                }
+            		CheckBox { name: "postHocTestsSidak";       label: qsTr("Šidák")                }
 		}
-
 		Group
 		{
-			title: qsTr("Type")
-			CheckBox { name: "postHocTestsTypeStandard";	label: qsTr("Standard"); checked: true	}
-			CheckBox { name: "postHocTestsTypeGames";		label: qsTr("Games-Howell")				}
-			CheckBox { name: "postHocTestsTypeDunnett";		label: qsTr("Dunnett")					}
-			CheckBox { name: "postHocTestsTypeDunn";		label: qsTr("Dunn")						}
+			title: qsTr("Display")
+			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
 		}
 	}
+	
 	
 	Section
 	{

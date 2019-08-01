@@ -52,7 +52,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   anovaContainer <- .getAnovaContainer(jaspResults)
 
   ## Create Linear model
-  .anovaModel(anovaContainer, dataset, options, ready)
+  .anovaModelContainer(anovaContainer, dataset, options, ready)
   
   ## Create ANOVA Table
   .anovaTable(anovaContainer, options, ready)
@@ -64,11 +64,16 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   .qqPlot(anovaContainer, dataset, options, ready)
   
   ## Create Descriptives Table
-  .anovaDescriptivesTable(anovaContainer, dataset, options, ready)
+  # .anovaDescriptivesTable(anovaContainer, dataset, options, ready)
+
+  options[["credibleInterval"]] <- 0.95
+  # browser()
+  .BANOVAdescriptives(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
+  # .BANOVAdescriptivesTable(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
   
   ## Create Descriptives Plot
   # .anovaDescriptivesPlot(anovaContainer, dataset, options, ready)
-  .BANOVAdescriptivesPlots(anovaContainer, dataset, options, list(noVariables = !ready), analysisType = "Ancova")
+  # .BANOVAdescriptivesPlots(anovaContainer, dataset, options, list(noVariables = !ready), analysisType = "Ancova")
   
   ## Create Kruskal Table
   .anovaKruskal(anovaContainer, dataset, options, ready)
@@ -87,9 +92,6 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   return()
   
-  # .anovabootsPostHoctrappingTable(dataset, options, perform, model, status, stateBootsPostHoc, singular)
-  # .anovaMarginalMeansBootstrapping(dataset, options, perform, model, status, singular, stateBootsMarginalMeans)
-
 }
 
 .getAnovaContainer <- function(jaspResults) {
@@ -333,13 +335,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   list(model.def = model.def, terms.base64 = terms.base64, terms.normal = terms.normal)
 }
 
-.anovaModel <- function(anovaContainer, dataset, options, ready) {
-  if (!ready) return()
-
-  # Take results from state if possible
-  if (!is.null(anovaContainer[["model"]]))
-    return()
-  
+.anovaModel <- function(dataset, options) {
   reorderModelTerms <-  .reorderModelTerms(options)
   modelTerms <- reorderModelTerms$modelTerms
   
@@ -352,12 +348,24 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   model <- aov(model.formula, dataset, weights=WLS)
   modelError <- try(silent = TRUE, lm(model.formula, dataset, weights=WLS, singular.ok = FALSE))
+  
+  return(list(model = model, modelError = modelError))
+}
 
-  if (.extractErrorMessage(modelError) == "singular fit encountered")
+.anovaModelContainer <- function(anovaContainer, dataset, options, ready) {
+  if (!ready) return()
+
+  # Take results from state if possible
+  if (!is.null(anovaContainer[["model"]]))
+    return()
+  
+  model <- .anovaModel(dataset, options)
+
+  if (.extractErrorMessage(model$modelError) == "singular fit encountered")
     anovaContainer$setError("Singular fit encountered; one or more predictor variables are a linear combination of other predictor variables")
   
   # Save model to state
-  anovaContainer[["model"]] <- createJaspState(object = model)
+  anovaContainer[["model"]] <- createJaspState(object = model$model)
 }
 
 .anovaResult <- function(anovaContainer, options) {
@@ -492,7 +500,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   title <- ifelse(is.null(options$covariates), "ANOVA", "ANCOVA")
   
-  table <- createJaspTable(title = title)
+  table <- createJaspTable(title = title, position = 1)
   
   corrections <- c("None", "Brown-Forsythe", "Welch")[c(options$homogeneityNone, 
                                                         options$homogeneityBrown,
@@ -725,11 +733,18 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   if (length(options$postHocTestsVariables) == 0 || !ready)
     return()
 
-  postHocContainer <- createJaspContainer(title = "Post Hoc Tests")
-  postHocContainer$dependOn(c("postHocTestsVariables"))
-  
-  anovaContainer[["postHocContainer"]] <- postHocContainer
-  
+  if (is.null(anovaContainer[["postHocContainer"]])) {
+    
+    postHocContainer <- createJaspContainer(title = "Post Hoc Tests")
+    postHocContainer$dependOn(c("postHocTestsVariables"))
+    anovaContainer[["postHocContainer"]] <- postHocContainer
+    
+  } else {
+    
+    postHocContainer <- anovaContainer[["postHocContainer"]]
+    
+  }
+
   if (options$postHocTestsTypeStandard)
     .anovaPostHocTable(postHocContainer, dataset, options,  anovaContainer[["model"]]$object)
 
@@ -742,7 +757,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   if (options$postHocTestsTypeDunn) 
     dunnPostHoc <- .anovaDunnTable(postHocContainer, dataset, options,  anovaContainer[["model"]]$object)
 
-  return()  
+  return()
 }
 
 .anovaPostHocTable <- function(postHocContainer, dataset, options, model) {
@@ -752,19 +767,26 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   postHocStandardContainer <- createJaspContainer(title = "Standard")
   postHocStandardContainer$dependOn(c("postHocTestsVariables", "postHocTestEffectSize", "postHocTestsBonferroni", 
                               "postHocTestsHolm", "postHocTestsScheffe", "postHocTestsTukey", "postHocTestsSidak",
-                              "postHocGroupByLetters"))
+                              "postHocGroupByLetters", "postHocTestsBootstrapping", "postHocTestsBootstrappingReplicates", 
+                              "confidenceIntervalsPostHoc", "confidenceIntervalIntervalPostHoc"))
   
   postHocContainer[["postHocStandardContainer"]] <- postHocStandardContainer
   
   postHocVariables <- unlist(options$postHocTestsVariables, recursive = FALSE)
   postHocVariablesListV <- unname(lapply(postHocVariables, .v))
-
+  
   for (postHocVarIndex in 1:length(postHocVariables)) {
     
     thisVarName <- paste(postHocVariables[[postHocVarIndex]], collapse = " \u273B ")
     interactionTerm <- length(postHocVariables[[postHocVarIndex]]) > 1
     
-    postHocStandardContainer[[thisVarName]] <- .createPostHocStandardTable(thisVarName, interactionTerm, options)
+    postHocStandardContainer[[thisVarName]] <- .createPostHocStandardTable(thisVarName, interactionTerm, options,
+                                                                           options$postHocTestsBootstrapping)
+  }
+
+  for (postHocVarIndex in 1:length(postHocVariables)) {
+    
+    thisVarName <- paste(postHocVariables[[postHocVarIndex]], collapse = " \u273B ")
     postHocInterval  <- options$confidenceIntervalIntervalPostHoc
 
     postHocRef <- emmeans::lsmeans(model, postHocVariablesListV)
@@ -773,18 +795,14 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 
     resultPostHoc <- lapply(postHocCorrections, function(x)
       summary(emmeans::contrast(postHocRef[[postHocVarIndex]], method = "pairwise"), 
-              adjust = x, infer = c(TRUE, TRUE)))
-    
+              adjust = x, infer = c(TRUE, TRUE), level = options$confidenceIntervalIntervalPostHoc))
+
     allContrasts <- strsplit(as.character(resultPostHoc[[1]]$contrast), split = " - ")
     
     if (options$confidenceIntervalsPostHoc & nrow(resultPostHoc[[1]]) > 1)
       postHocStandardContainer[[thisVarName]]$addFootnote(
         message = gsub(x = attr(resultPostHoc[[1]], "mesg")[3], "Conf-level", "Confidence interval"),
         symbol = "<i>Note.</i>")
-    
-    # if (any(class(resultPostHoc) == "try-error"))
-    #   postHocStandardContainer$setError("Some comparisons could not be performed. Possibly too few samples.")
-    # 
     
     # Calculate effect sizes
     if (options$postHocTestEffectSize & nrow(dataset) > 0 & !interactionTerm) {
@@ -809,32 +827,29 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     resultPostHoc[["contrast_A"]] <- do.call(rbind, allContrasts)[, 1]
     resultPostHoc[["contrast_B"]] <- do.call(rbind, allContrasts)[, 2]
 
-    postHocStandardContainer[[thisVarName]]$setData(resultPostHoc)
-    
-    if (options$postHocGroupByLetters) {
-      p <- resultPostHoc[["p.value"]]
-      names(p) <- resultPostHoc[["contrast"]]
-      lettersResult <- multcompView::multcompLetters(p)$Letters
-      lettersResult <- data.frame(group = names(lettersResult), letter = lettersResult)
-      
-      letterTableName <- paste0("Letter Summary - ", thisVarName)
-      postHocStandardContainer[[letterTableName]] <- createJaspTable(title = letterTableName, data = lettersResult)
-    }   
-    
+    # browser()
+    # if (options$postHocGroupByLetters) {
+    #   p <- resultPostHoc[["p.value"]]
+    #   names(p) <- resultPostHoc[["contrast"]]
+    #   lettersResult <- multcompView::multcompLetters(p)$Letters
+    #   lettersResult <- data.frame(group = names(lettersResult),
+    #                               mean = postHocRef[[postHocVarIndex]][["lsmean"]]
+    #                               letter = lettersResult)
+    #   
+    #   letterTableName <- paste0("Letter Summary - ", thisVarName)
+    #   postHocStandardContainer[[letterTableName]] <- createJaspTable(title = letterTableName, data = lettersResult)
+    # }   
+    # 
     
     if (options$postHocTestsBootstrapping) {
       
-      bootStrapTable <- .createPostHocStandardTable(thisVarName, 
-                                                    interactionTerm, 
-                                                    options,
-                                                    makeBootstrapTable = TRUE)
-      
-      bootStrapTable$addFootnote(message = paste0("Bootstrapping based on ", 
+      postHocStandardContainer[[thisVarName]]$addFootnote(message = paste0("Bootstrapping based on ", 
                                                   options[['postHocTestsBootstrappingReplicates']], " replicates."))
-      bootStrapTable$addFootnote(message = "Mean Difference estimate is based on the median of the bootstrap distribution.")
-      bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
+      postHocStandardContainer[[thisVarName]]$addFootnote(message = "Mean Difference estimate is based on the median of 
+                                                          the bootstrap distribution.")
+      postHocStandardContainer[[thisVarName]]$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") 
       
-      startProgressbar(options[["postHocTestsBootstrappingReplicates"]])
+      startProgressbar(options[["postHocTestsBootstrappingReplicates"]] * length(postHocVariables))
       
       bootstrapPostHoc <- try(boot::boot(data = dataset, statistic = .bootstrapPostHoc, 
                                          R = options[["postHocTestsBootstrappingReplicates"]],
@@ -861,7 +876,8 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       }))
       
       if(ci.fails)
-        bootStrapTable$addFootnote(message = "Some confidence intervals could not be computed. Possibly too few bootstrap replicates.")
+        postHocStandardContainer[[thisVarName]]$addFootnote(message = "Some confidence intervals could not be computed.
+                                                            Possibly too few bootstrap replicates.")
       
       resultPostHoc[["lower.CL"]] <- bootstrapPostHocConf[,1]
       resultPostHoc[["upper.CL"]] <- bootstrapPostHocConf[,2]
@@ -869,10 +885,13 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       resultPostHoc[["bias"]] <- bootStrapSummary[["bootBias"]]
       resultPostHoc[["SE"]] <- bootStrapSummary[["bootSE"]]
 
-      bootStrapTable$setData(resultPostHoc)
+      # bootStrapTable$setData(resultPostHoc)
 
-      postHocStandardContainer[[paste0(thisVarName, "bootstrap")]] <- bootStrapTable
+      # postHocStandardContainer[[paste0(thisVarName, "bootstrap")]] <- bootStrapTable
     }
+    
+    postHocStandardContainer[[thisVarName]]$setData(resultPostHoc)
+    
   }
   
   return()
@@ -892,9 +911,9 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   if (options$confidenceIntervalsPostHoc || makeBootstrapTable) {
     
     if (makeBootstrapTable) {
-      thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% bca\u002A CI")
+      thisOverTitle <- paste0(options$confidenceIntervalIntervalPostHoc * 100, "% bca\u002A CI")
     } else {
-      thisOverTitle <- paste0(options$confidenceIntervalIntervalContrast * 100, "% CI for Mean Difference")
+      thisOverTitle <- paste0(options$confidenceIntervalIntervalPostHoc * 100, "% CI for Mean Difference")
     }
     
     postHocTable$addColumnInfo(name="lower.CL", type = "number", title = "Lower",
@@ -909,29 +928,28 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     
     postHocTable$addColumnInfo(name="bias", type="number")
     
-  } else {
+  } 
     
-    postHocTable$addColumnInfo(name="t.ratio", title="t", type="number")
-    
-    if (options$postHocTestEffectSize & !interactionTerm) 
-      postHocTable$addColumnInfo(name="cohenD", title="Cohen's d", type="number")
-    
-    if (options$postHocTestsTukey)
-      postHocTable$addColumnInfo(name="tukey", title="p<sub>tukey</sub>", type="number")
-    
-    if (options$postHocTestsScheffe)
-      postHocTable$addColumnInfo(name="scheffe", title="p<sub>scheffe</sub>", type="number")
-    
-    if (options$postHocTestsBonferroni)
-      postHocTable$addColumnInfo(name="bonferroni", title="p<sub>bonf</sub>", type="number")
-    
-    if (options$postHocTestsHolm)
-      postHocTable$addColumnInfo(name="holm",title="p<sub>holm</sub>", type="number")
-    
-    if(options$postHocTestsSidak)
-      postHocTable$addColumnInfo(name="sidak",title="p<sub>sidak</sub>", type="number")
-    
-  }
+  postHocTable$addColumnInfo(name="t.ratio", title="t", type="number")
+  
+  if (options$postHocTestEffectSize & !interactionTerm) 
+    postHocTable$addColumnInfo(name="cohenD", title="Cohen's d", type="number")
+  
+  if (options$postHocTestsTukey)
+    postHocTable$addColumnInfo(name="tukey", title="p<sub>tukey</sub>", type="number")
+  
+  if (options$postHocTestsScheffe)
+    postHocTable$addColumnInfo(name="scheffe", title="p<sub>scheffe</sub>", type="number")
+  
+  if (options$postHocTestsBonferroni)
+    postHocTable$addColumnInfo(name="bonferroni", title="p<sub>bonf</sub>", type="number")
+  
+  if (options$postHocTestsHolm)
+    postHocTable$addColumnInfo(name="holm",title="p<sub>holm</sub>", type="number")
+  
+  if(options$postHocTestsSidak)
+    postHocTable$addColumnInfo(name="sidak",title="p<sub>sidak</sub>", type="number")
+  
     
   postHocTable$showSpecifiedColumnsOnly <- TRUE
   
@@ -942,12 +960,10 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   resamples <- data[indices, , drop = FALSE] # allows boot to select sample
 
-  bootStrapPostHocContainer <- createJaspContainer()
-  
-  .anovaModel(bootStrapPostHocContainer, resamples, options, TRUE) # refit model
+  model <- .anovaModel(resamples, options)$model # refit model
   
   postHocRefBoots <- suppressMessages(
-    emmeans::lsmeans(bootStrapPostHocContainer[["model"]]$object, postHocVariablesListV)
+    emmeans::lsmeans(model, postHocVariablesListV)
   )
   
   postHocTableBoots <- suppressMessages(
@@ -1315,7 +1331,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   model <- anovaContainer[["model"]]$object
   
-  createMarginalMeansTable <- function(myTitle, individualTerms, makeBootstrapTable = FALSE ) {
+  createMarginalMeansTable <- function(myTitle, options, individualTerms, makeBootstrapTable = FALSE ) {
     
     preTitle <- if (!makeBootstrapTable) "Marginal Means - " else "Bootstrapped Marginal Means - "
     marginalMeansTable <- createJaspTable(title = paste0(preTitle, myTitle))
@@ -1342,8 +1358,15 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       
       marginalMeansTable$addColumnInfo(name="bias", type="number")
       
-    } else if(options$marginalMeansCompareMainEffects) {
+      marginalMeansTable$addFootnote(message = paste0("Bootstrapping based on ", 
+                                                      options[['marginalMeansBootstrappingReplicates']], " replicates."))
+      marginalMeansTable$addFootnote(message = "Marginal Means estimate is based on the median of 
+                                                        the bootstrap distribution.")
+      marginalMeansTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") 
       
+    }
+      
+    if (options$marginalMeansCompareMainEffects) {
       marginalMeansTable$addColumnInfo(name="t.ratio", title="t", type="number")
       marginalMeansTable$addColumnInfo(name="df", type="integer")
       marginalMeansTable$addColumnInfo(name="p.value", title="p", type="number")
@@ -1353,7 +1376,6 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       } else if (options$marginalMeansCIAdjustment == "sidak") {
         marginalMeansTable$addFootnote(message = "Sidak CI adjustment")
       }
-      
     }
     
     marginalMeansTable$showSpecifiedColumnsOnly <- TRUE
@@ -1363,9 +1385,16 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   terms <- options$marginalMeansTerms
   
-  
   marginalVariables <- unlist(options$marginalMeansTerms, recursive = FALSE)
   marginalVariablesListV <- unname(lapply(marginalVariables, .v))
+  
+  for (i in .indices(marginalVariables)) {
+    thisVarName <- paste(marginalVariables[[i]], collapse = " \u273B ")
+    individualTerms <- marginalVariables[[i]]
+    marginalMeansContainer[[thisVarName]] <- createMarginalMeansTable(thisVarName, options, individualTerms, 
+                                                                      options$marginalMeansBootstrapping)
+  }
+  
   
   terms.base64 <- c()
   terms.normal <- c()
@@ -1422,22 +1451,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     
     names(r)[1:length(individualTerms)] <- individualTerms
     
-    marginalTable <- createMarginalMeansTable(thisVarName, individualTerms)
-    
-    marginalTable$setData(r)
-
-    marginalMeansContainer[[paste0("marginalTable", thisVarName)]] <- marginalTable
-    
     if (options$marginalMeansBootstrapping) {
-      
-      bootStrapTable <- createMarginalMeansTable(thisVarName, 
-                                                 individualTerms, 
-                                                 makeBootstrapTable = TRUE)
-      
-      bootStrapTable$addFootnote(message = paste0("Bootstrapping based on ", 
-                                                  options[['marginalMeansBootstrappingReplicates']], " replicates."))
-      bootStrapTable$addFootnote(message = "Marginal Means estimate is based on the median of the bootstrap distribution.")
-      bootStrapTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") # What does this even mean??
       
       startProgressbar(options[["marginalMeansBootstrappingReplicates"]])
 
@@ -1472,10 +1486,8 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       r[["bias"]] <- bootStrapSummary[["bootBias"]]
       r[["SE"]] <- bootStrapSummary[["bootSE"]]
       
-      bootStrapTable$setData(r)
-      
-      marginalMeansContainer[[paste0(thisVarName, "bootstrap")]] <- bootStrapTable
     }
+    marginalMeansContainer[[thisVarName]]$setData(r)
   }
   
   return()
@@ -1485,14 +1497,10 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   resamples <- data[indices, , drop=FALSE]
 
-  bootStrapMarginalMeansContainer <- createJaspContainer()
-  
-  .anovaModel(bootStrapMarginalMeansContainer, resamples, options, TRUE) # refit model
-  
-  modelBoots <- bootStrapMarginalMeansContainer[["model"]]$object
+  model <- .anovaModel(resamples, options)$model # refit model
   
   r <- suppressMessages( # to remove clutter
-    summary(emmeans::lsmeans(modelBoots, anovaFormula), infer = c(FALSE,FALSE))
+    summary(emmeans::lsmeans(model, anovaFormula), infer = c(FALSE,FALSE))
   )
   
   progressbarTick()

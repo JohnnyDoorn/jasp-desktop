@@ -23,16 +23,15 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   factorVariables <- factorVariables[factorVariables != ""]
   
   # Check if we're ready to actually compute something or just show empty tables
-  ready <- length(options$dependent) > 0 && length(options$fixedFactors) > 0 && length(options$modelTerms) > 0
+  ready <- options$dependent != "" && length(options$fixedFactors) > 0 && length(options$modelTerms) > 0
   
   # Set corrections to FALSE when performing ANCOVA
   if (is.null(options$homogeneityBrown)) {
-    options$homogeneityNone <- FALSE
+    options$homogeneityNone <- TRUE
     options$homogeneityBrown <- FALSE
     options$homogeneityWelch <- FALSE
   }
-  
-  
+
   if (is.null(dataset)) {
       
       dataset <- .readDataSetToEnd(columns.as.numeric = numericVariables, 
@@ -67,7 +66,6 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   # .anovaDescriptivesTable(anovaContainer, dataset, options, ready)
 
   options[["credibleInterval"]] <- 0.95
-  # browser()
   .BANOVAdescriptives(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
   # .BANOVAdescriptivesTable(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
   
@@ -100,7 +98,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   } else {
     anovaContainer <- createJaspContainer()
     # we set the dependencies on the container, this means that all items inside the container automatically have these dependencies
-    anovaContainer$dependOn(c("dependent", "modelTerms", "contrasts", "covariates"))
+    anovaContainer$dependOn(c("dependent", "modelTerms", "contrasts", "covariates", "sumOfSquares"))
     jaspResults[["anovaContainer"]] <- anovaContainer
   }
   return(anovaContainer)
@@ -361,19 +359,17 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   model <- .anovaModel(dataset, options)
 
-  if (.extractErrorMessage(model$modelError) == "singular fit encountered")
+  if (.extractErrorMessage(model$modelError) == "singular fit encountered") {
     anovaContainer$setError("Singular fit encountered; one or more predictor variables are a linear combination of other predictor variables")
+    return()
+  }
   
   # Save model to state
   anovaContainer[["model"]] <- createJaspState(object = model$model)
 }
 
 .anovaResult <- function(anovaContainer, options) {
-  
-  # Take results from state if possible
-  if (!is.null(anovaContainer[["anovaResult"]])) 
-    return()
-  
+
   model <- anovaContainer[["model"]]$object
   
   reorderModelTerms <-  .reorderModelTerms(options)
@@ -383,7 +379,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   termsNormal <- modelDef$terms.normal
   termsBase64 <- modelDef$terms.base64
   
-  
+  ## Computation
   if (options$sumOfSquares == "type1") {
     
     result <- base::tryCatch(stats::anova(model),error=function(e) e, warning=function(w) w)
@@ -400,6 +396,12 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     result['SSt'] <- sum(result[['Sum Sq']], na.rm = TRUE)
     
   } else if (options$sumOfSquares == "type3") {
+
+    # For each model term, including all interactions, check if there are empty cells
+    if (any(sapply(options$modelTerms, function(x) any(table(model$model[, .v(x$components)]) == 0)))) {
+      anovaContainer$setError("Your design contains empty cells. Please try a different type of sum of squares.")
+      return()
+    }
     
     result <- car::Anova(model, type=3, singular.ok=FALSE)
     result <- result[-1, ]
@@ -439,8 +441,11 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     return()
   }
   
-  anovaResult <- list(result = result)
-  
+  anovaResult <- list()
+  if (options$homogeneityNone) {
+    anovaResult[["result"]] <- result
+  }
+
   if (options$homogeneityBrown) {
 
     tempResult <- onewaytests::bf.test(as.formula(modelDef$model.def), model$model)
@@ -491,23 +496,23 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   anovaContainer[["anovaResult"]] <- createJaspState(object = anovaResult)
   anovaContainer[["anovaResult"]]$dependOn(c("sumOfSquares", "homogeneityBrown", "homogeneityWelch", 
                                              "homogeneityNone", "effectSizeEstimates", "effectSizeEtaSquared",
-                                             "effectSizePartialEtaSquared", "effectSizeOmegaSquared"))
+                                              "effectSizePartialEtaSquared", "effectSizeOmegaSquared"))
 }
 
 .anovaTable <- function(anovaContainer, options, ready) {
-  if (!is.null(anovaContainer[["anovaTable"]]))
+  if (!is.null(anovaContainer[["anovaResult"]]))
     return()
   
   title <- ifelse(is.null(options$covariates), "ANOVA", "ANCOVA")
   
   table <- createJaspTable(title = title, position = 1)
-  
+
   corrections <- c("None", "Brown-Forsythe", "Welch")[c(options$homogeneityNone, 
                                                         options$homogeneityBrown,
                                                         options$homogeneityWelch)]
 
   dfType <- "integer" # Make df an integer unless corrections are applied
-  if ((length(corrections) > 1 || !"None" %in% corrections) && is.null(options$covariates)) {
+  if ((length(corrections) > 1 || any(!"None" %in% corrections)) && is.null(options$covariates)) {
     table$addColumnInfo(title = "Homogeneity Correction", name = "correction", type = "string")
     dfType <- "number"
   }
@@ -568,7 +573,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     return()
 
   model <- anovaContainer[["anovaResult"]]$object
-  table$setData(do.call("rbind", model))
+    table$setData(do.call("rbind", model))
 
   return()
 }
@@ -629,6 +634,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     return()
   
   
+  ## Computation
   model <- anovaContainer[["model"]]$object
   contrastSummary <- summary.lm(model)[["coefficients"]]
     
@@ -767,7 +773,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   postHocStandardContainer <- createJaspContainer(title = "Standard")
   postHocStandardContainer$dependOn(c("postHocTestsVariables", "postHocTestEffectSize", "postHocTestsBonferroni", 
                               "postHocTestsHolm", "postHocTestsScheffe", "postHocTestsTukey", "postHocTestsSidak",
-                              "postHocGroupByLetters", "postHocTestsBootstrapping", "postHocTestsBootstrappingReplicates", 
+                              "postHocFlagSignificant", "postHocTestsBootstrapping", "postHocTestsBootstrappingReplicates", 
                               "confidenceIntervalsPostHoc", "confidenceIntervalIntervalPostHoc"))
   
   postHocContainer[["postHocStandardContainer"]] <- postHocStandardContainer
@@ -793,6 +799,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     
     postHocCorrections <- c("tukey", "scheffe", "bonferroni", "holm", "sidak")
 
+    ## Computation
     resultPostHoc <- lapply(postHocCorrections, function(x)
       summary(emmeans::contrast(postHocRef[[postHocVarIndex]], method = "pairwise"), 
               adjust = x, infer = c(TRUE, TRUE), level = options$confidenceIntervalIntervalPostHoc))
@@ -827,18 +834,18 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     resultPostHoc[["contrast_A"]] <- do.call(rbind, allContrasts)[, 1]
     resultPostHoc[["contrast_B"]] <- do.call(rbind, allContrasts)[, 2]
 
-    # browser()
     # if (options$postHocGroupByLetters) {
-    #   p <- resultPostHoc[["p.value"]]
-    #   names(p) <- resultPostHoc[["contrast"]]
-    #   lettersResult <- multcompView::multcompLetters(p)$Letters
-    #   lettersResult <- data.frame(group = names(lettersResult),
-    #                               mean = postHocRef[[postHocVarIndex]][["lsmean"]]
-    #                               letter = lettersResult)
-    #   
-    #   letterTableName <- paste0("Letter Summary - ", thisVarName)
-    #   postHocStandardContainer[[letterTableName]] <- createJaspTable(title = letterTableName, data = lettersResult)
-    # }   
+      
+      # p <- resultPostHoc[["p.value"]]
+      # names(p) <- resultPostHoc[["contrast"]]
+      # lettersResult <- multcompView::multcompLetters(p)$Letters
+      # lettersResult <- data.frame(group = names(lettersResult),
+      #                             # mean = postHocRef[[postHocVarIndex]][["lsmean"]]
+      #                             letter = lettersResult)
+      # 
+      # letterTableName <- paste0("Letter Summary - ", thisVarName)
+      # postHocStandardContainer[[letterTableName]] <- createJaspTable(title = letterTableName, data = lettersResult)
+    # }
     # 
     
     if (options$postHocTestsBootstrapping) {
@@ -851,6 +858,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       
       startProgressbar(options[["postHocTestsBootstrappingReplicates"]] * length(postHocVariables))
       
+      ## Computation
       bootstrapPostHoc <- try(boot::boot(data = dataset, statistic = .bootstrapPostHoc, 
                                          R = options[["postHocTestsBootstrappingReplicates"]],
                                          options = options, 
@@ -885,12 +893,22 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
       resultPostHoc[["bias"]] <- bootStrapSummary[["bootBias"]]
       resultPostHoc[["SE"]] <- bootStrapSummary[["bootSE"]]
 
-      # bootStrapTable$setData(resultPostHoc)
-
-      # postHocStandardContainer[[paste0(thisVarName, "bootstrap")]] <- bootStrapTable
     }
     
     postHocStandardContainer[[thisVarName]]$setData(resultPostHoc)
+    
+    
+    if (options$postHocFlagSignificant) {
+      for (i in 3:1) {
+        signifComparisons <- rownames(resultPostHoc)[resultPostHoc$p.value < c(0.05, 0.01, 0.001)[i]]
+        if (length(signifComparisons) > 0)
+          colNames <- rep("tukey", length(signifComparisons))
+          postHocStandardContainer[[thisVarName]]$addFootnote(message = "p < .05, ** p < .01, *** p < .001", 
+                                                              colNames = colNames, rowNames = signifComparisons,
+                                                              symbol = paste0(rep("*", i), collapse = ""))
+
+      }
+    }
     
   }
   
@@ -1546,7 +1564,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   if (!ready) 
     return()
-  
+
   fullAnovaMS <-   anovaContainer[["anovaResult"]]$object$result["Residuals", "Mean Sq"]
   fullAnovaDf <-   anovaContainer[["anovaResult"]]$object$result["Residuals", "Df"]
 

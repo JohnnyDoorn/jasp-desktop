@@ -198,7 +198,7 @@ Form
 		Group
 		{
 			title: qsTr("Display")
-			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
+			CheckBox { name: "postHocFlagSignificant";	label: qsTr("Flag Significant Comparisons") }
 		}
 	}
 	

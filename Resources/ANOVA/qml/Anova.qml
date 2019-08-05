@@ -87,7 +87,7 @@ Form
 			Group
 			{
 				title: qsTr("Homogeneity corrections")
-				columns: 3
+					columns: 3
 				CheckBox { name: "homogeneityNone";		label: qsTr("None")           ; checked: true }
 				CheckBox { name: "homogeneityBrown";	label: qsTr("Brown-Forsythe") ; checked: false }
 				CheckBox { name: "homogeneityWelch";	label: qsTr("Welch")          ; checked: false }
@@ -172,7 +172,7 @@ Form
 		Group
 		{
 			title: qsTr("Display")
-			CheckBox { name: "postHocGroupByLetters";	label: qsTr("Letter Summary of Comparisons") }
+			CheckBox { name: "postHocFlagSignificant";	label: qsTr("Flag Significant Comparisons") }
 		}
 	}
 	

@@ -1158,9 +1158,9 @@
   # without the container, the position could mess things up
   descriptivesContainer <- jaspResults[["descriptivesContainer"]]
   if (is.null(descriptivesContainer)) {
-    descriptivesContainer <- createJaspContainer()
+    descriptivesContainer <- createJaspContainer(title = "Descriptives")
     descriptivesContainer$dependOn(c("dependent", "repeatedMeasuresCells"))
-    descriptivesContainer$position <- 900 # always last
+    descriptivesContainer$position <- 9001 # always last
     jaspResults[["descriptivesContainer"]] <- descriptivesContainer
   }
 
@@ -1303,7 +1303,8 @@
     conf.interval <- options$confidenceIntervalInterval
   }
 
-  descriptivesPlotContainer$dependOn(c("plotHorizontalAxis", "plotSeparateLines", "plotSeparatePlots", "labelYAxis"))
+  descriptivesPlotContainer$dependOn(c("plotHorizontalAxis", "plotSeparateLines", "plotSeparatePlots", "labelYAxis",
+                                       "plotErrorBars", "errorBarType"))
 
   if (errors$noVariables) {
     descriptivesPlotContainer[["dummyplot"]] <- createJaspPlot(title = "Descriptives Plot")
@@ -1372,7 +1373,7 @@
     if (nPlots > 1L) {
       title <- paste(options$plotSeparatePlots,": ",subsetPlots[i], sep = "")
     } else {
-      title <- "Descriptives Plot"
+      title <- ""
     }
     descriptivesPlot <- createJaspPlot(title = title)
     descriptivesPlotContainer[[title]] <- descriptivesPlot

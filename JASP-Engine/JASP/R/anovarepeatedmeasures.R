@@ -14,430 +14,166 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
+AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
+  
+  numericVariables <- c(unlist(options$repeatedMeasuresCells),unlist(options$covariates))
+  numericVariables <- numericVariables[numericVariables != ""]
+  factorVariables <- c(unlist(options$betweenSubjectFactors))
+  factorVariables <- factorVariables[factorVariables != ""]
+  
+  if (is.null(dataset)) 
+    dataset <- .readDataSetToEnd(columns.as.numeric=numericVariables, columns.as.factor=factorVariables, 
+                                 exclude.na.listwise=c(numericVariables, factorVariables))
+  
+  longData <- .BANOVAreadRManovaData(dataset, options)
+  
+  ready <- length(options$repeatedMeasuresCells) > 1 &&  length(options$withinModelTerms) > 0
+  
+  ## Error checking
+  # .rmAnovaCheckErrors(dataset, options, ready)
+  .BANOVAerrorhandling(longData, options, "RM-ANOVA")
+  
+  ## Create container 
+  rmAnovaContainer <- .getRMAnovaContainer(jaspResults)
 
-AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback=function(...) 0, ...) {
-  numeric.variables <- c(unlist(options$repeatedMeasuresCells), unlist(options$covariates))
-  numeric.variables <- numeric.variables[numeric.variables != ""]
-  factor.variables <- c(unlist(options$betweenSubjectFactors))
-  factor.variables <- factor.variables[factor.variables != ""]
+  .rmAnovaModelContainer(rmAnovaContainer, longData, options, ready)
   
-  if (is.null(dataset)) {
-    
-    if (perform == "run") {
-      
-      dataset <- .readDataSetToEnd(columns.as.numeric=numeric.variables, columns.as.factor=factor.variables, exclude.na.listwise=c(numeric.variables, factor.variables))
-      
-    } else {
-      
-      dataset <- .readDataSetHeader(columns.as.numeric=numeric.variables, columns.as.factor=factor.variables)
-    }
-    
-  } else {
-    
-    dataset <- .vdf(dataset, columns.as.numeric=numeric.variables, columns.as.factor=factor.variables)
-  }
+  .referenceGrid(rmAnovaContainer, options, ready)
   
-  results <- list()
+  .resultsPostHoc(rmAnovaContainer, options, dataset, ready)
+  
+  return()
+  
+  # Descriptives
+  options[["credibleInterval"]] <- 0.95
+  .BANOVAdescriptives(rmAnovaContainer, longData, options, list(noVariables=FALSE), "RM-ANOVA")
+  # plotDepends <- c("plotHorizontalAxis", "plotSeparateLines", "plotSeparatePlots", "plotErrorBars", "usePooledStandErrorCI")
+  
+  
+  anovaModel <- .rmAnovaModel(dataset, options, status)
+  
+  
+  statePostHoc <- .resultsPostHoc(referenceGrid, options, dataset, fullModel)
+  stateContrasts <- .resultsContrasts(dataset, options, referenceGrid)
+  stateSphericity <- .resultsSphericity(options, epsilon, mauchly, model)
   
   
   
-  ## Retrieve State
-  
-  state <- .retrieveState()
-  anovaModel <- NULL
-  stateDescriptivesPlot <- NULL
-  stateDescriptivesTable <- NULL
-  stateLevene <- NULL
-  statePostHoc <- NULL
-  stateContrasts <- NULL
-  stateSimpleEffects <- NULL
-  stateSphericity <- NULL
-  stateFriedman <- NULL
-  stateConover <- NULL
-  stateMarginalMeans <- NULL
-  stateMarginalMeansBoots <- NULL
-  
-  if ( ! is.null(state)) {  # is there state?
-    
-    diff <- .diff(options, state$options)  # compare old and new options
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && diff[['repeatedMeasuresCells']] == FALSE &&
-        diff[['postHocTestEffectSize']] == FALSE && diff[['postHocTestsVariables']] == FALSE &&diff[['postHocTestPooledError']] == FALSE && 
-        diff[['repeatedMeasuresFactors']] == FALSE && diff[['sumOfSquares']] == FALSE && diff[['covariates']] == FALSE && diff[['betweenSubjectFactors']] == FALSE
-        && diff[['confidenceIntervalsPostHoc']] == FALSE && diff[['confidenceIntervalIntervalPostHoc']] == FALSE) {
-      
-      # old model can be used
-      
-      anovaModel <- state$model
-      fullModel <- anovaModel$fullModel
-      statePostHoc <- state$statePostHoc
-      stateContrasts <- state$stateContrasts
-      stateSphericity <- state$stateSphericity
-      
-    }
-    
-    if (is.list(diff) && diff[['plotHorizontalAxis']] == FALSE && diff[['plotSeparateLines']] == FALSE && diff[['plotSeparatePlots']] == FALSE &&
-        diff[['plotErrorBars']] == FALSE && diff[['labelYAxis']] == FALSE && !(diff[['errorBarType']] == TRUE && options$plotErrorBars == TRUE) &&
-        !(diff[['confidenceIntervalInterval']] == TRUE && options$errorBarType == "confidenceInterval" && options$plotErrorBars == TRUE) &&
-        diff[['plotWidthDescriptivesPlotLegend']] == FALSE && diff[['plotHeightDescriptivesPlotLegend']] == FALSE &&
-        diff[['plotWidthDescriptivesPlotNoLegend']] == FALSE && diff[['plotHeightDescriptivesPlotNoLegend']] == FALSE &&
-        diff[['repeatedMeasuresFactors']] == FALSE && diff[['repeatedMeasuresCells']] == FALSE && diff[['usePooledStandErrorCI']] == FALSE) {
-      
-      # old descriptives plots can be used
-      
-      stateDescriptivesPlot <- state$stateDescriptivesPlot
-    }
-    
-    if (is.list(diff) && diff[['betweenSubjectFactors']] == FALSE && diff[['repeatedMeasuresFactors']] == FALSE  && diff[['repeatedMeasuresCells']] == FALSE &&
-        diff[['descriptives']] == FALSE) {
-      
-      # old descriptives table can be used
-      
-      stateDescriptivesTable <- state$stateDescriptivesTable
-      
-    }
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && diff[['repeatedMeasuresCells']] == FALSE &&
-        diff[['repeatedMeasuresFactors']] == FALSE && diff[['homogeneityTests']] == FALSE && diff[["VovkSellkeMPR"]] == FALSE) {
-      
-      # old levene's table can be used
-      
-      stateLevene <- state$stateLevene
-    }
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && diff[['repeatedMeasuresCells']] == FALSE &&
-        diff[['repeatedMeasuresFactors']] == FALSE && diff[['sumOfSquares']] == FALSE && diff[['simpleFactor']] == FALSE && 
-        diff[['moderatorFactorOne']] == FALSE && diff[['moderatorFactorTwo']] == FALSE && diff[['poolErrorTermSimpleEffects']] == FALSE ) {
-      
-      # old simple effects tables can be used
-      
-      stateSimpleEffects <- state$stateSimpleEffects
-      
-    }
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && 
-        diff[['repeatedMeasuresCells']] == FALSE && diff[['repeatedMeasuresFactors']] == FALSE && 
-        diff[['sumOfSquares']] == FALSE && diff[['covariates']] == FALSE && 
-        diff[['betweenSubjectFactors']] == FALSE && diff[['marginalMeansTerms']] == FALSE && 
-        diff[['marginalMeansCompareMainEffects']] == FALSE && diff[['marginalMeansCIAdjustment']] == FALSE) {
-      
-      # old marginal means tables can be used
-      stateMarginalMeans <- state$stateMarginalMeans
-    }
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && 
-        diff[['repeatedMeasuresCells']] == FALSE && diff[['repeatedMeasuresFactors']] == FALSE && 
-        diff[['sumOfSquares']] == FALSE && diff[['covariates']] == FALSE && 
-        diff[['betweenSubjectFactors']] == FALSE && diff[['marginalMeansTerms']] == FALSE && 
-        diff[['marginalMeansBootstrappingReplicates']] == FALSE) {
-      
-      # old marginal means bootstrapping tables can be used
-      stateMarginalMeansBoots <- state$stateMarginalMeansBoots
-    }
-    
-    if (is.list(diff) && diff[['withinModelTerms']] == FALSE && diff[['betweenModelTerms']] == FALSE && 
-        diff[['repeatedMeasuresCells']] == FALSE && diff[['friedmanWithinFactor']] == FALSE && diff[['repeatedMeasuresFactors']] == FALSE && 
-        diff[['friedmanBetweenFactor']] == FALSE && diff[['contrasts']] == FALSE && diff[['conoverTest']] == FALSE) {
-      
-      # old Friedman table can be used
-      
-      stateFriedman <- state$stateFriedman
-      stateConover <- state$stateConover
-    }
-  }
-  
-  
-  
-  ## Create Title
-  
-  results[["title"]] <- "Repeated Measures ANOVA"
-  
-  
-  status <- .rmAnovaCheck(dataset, options, perform)
-  
-  
-  
-  ## Perform ANOVA
-  
-  model <- NULL
-  
-  if (is.null(anovaModel)) { # if not retrieved from state
-    
-    if (perform == "run" && status$ready && status$error == FALSE) {
-      
-      anovaModel <- .rmAnovaModel(dataset, options, status)
-      
-      model <- anovaModel$model
-      epsilon <- anovaModel$epsilon
-      mauchly <- anovaModel$mauchly
-      fullModel <- anovaModel$fullModel
-      status <- anovaModel$status
-      
-      if (is.null(fullModel) || (length(class(fullModel)) == 1 && class(fullModel) == "try-error")) {
-        
-        referenceGrid <- NULL
-        statePostHoc <- NULL
-        stateContrasts <- NULL
-        stateSphericity <- NULL
-        stateMarginalMeans <- NULL
-        stateMarginalMeansBoots <- NULL
-        
-      } else {
-        
-        referenceGrid <- .referenceGrid(options, fullModel)
-        statePostHoc <- .resultsPostHoc(referenceGrid, options, dataset, fullModel)
-        stateContrasts <- .resultsContrasts(dataset, options, referenceGrid)
-        stateSphericity <- .resultsSphericity(options, epsilon, mauchly, model)
-        
-      }
-    }
-    
-  } else {
-    
-    model <- anovaModel$model
-    status <- anovaModel$status
-    
-  }
   
   ## Create Within Subjects Effects Table
   result <- .rmAnovaWithinSubjectsTable(dataset, options, perform, model, stateSphericity, status, fullModel)
   
-  results[["withinSubjectsEffects"]] <- result$result
-  status <- result$status
-  
-  
   ## Create Between Subjects Effects Table
-  # if(length(unique(unlist(options$betweenSubjectFactors))) > 0 ){
   result <- .rmAnovaBetweenSubjectsTable(dataset, options, perform, model, status, fullModel)
   
-  results[["betweenSubjectsEffects"]] <- result$result
-  status <- result$status
-  # }
-  
-  
   ## Create Sphericity Assumption Table
-  
-  if (options$sphericityTests) {
-    
-    result <- .sphericityTest(options, stateSphericity, perform, status)
-    resultSphericity <- result$result
-    status <- result$status
-    
-  } else {
-    
-    resultSphericity <- NULL
-    
-  }
+  result <- .sphericityTest(options, stateSphericity, perform, status)
   
   
   
   ## Create Levene's Table
+  result <- .rmAnovaLevenesTable(dataset, options, perform, status, stateLevene, model)
   
-  if (is.null(stateLevene)) {
-    
-    result <- .rmAnovaLevenesTable(dataset, options, perform, status, stateLevene, model)
-    resultLevene <- result$result
-    status <- result$status
-    stateLevene <- result$stateLevene
-    
-  } else {
-    
-    resultLevene <- stateLevene
-    
-  }
   
   ## Create Simple Effects Table
+  result <- .rmAnovaSimpleEffects(dataset, options, perform, fullModel, results[["withinSubjectsEffects"]], 
+                                  results[["betweenSubjectsEffects"]], status, singular, stateSimpleEffects)
   
-  if (is.null(stateSimpleEffects)) {
-    
-    result <- .rmAnovaSimpleEffects(dataset, options, perform, fullModel, results[["withinSubjectsEffects"]], 
-                                    results[["betweenSubjectsEffects"]], status, singular, stateSimpleEffects)
-    results[["simpleEffects"]] <- result$result
-    status <- result$status
-    stateSimpleEffects <- result$stateSimpleEffects
-    
-  } else {
-    
-    results[["simpleEffects"]] <- stateSimpleEffects
-    
-  }
   
-  if (is.null(stateFriedman)) {
-    
-    result <- .rmAnovaFriedman(dataset, fullModel, options, perform, status, singular, stateFriedman)
-    results[["friedman"]] <- result$result
-    status <- result$status
-    stateFriedman <- result$stateFriedman
-    
-  } else {
-    
-    results[["friedman"]] <- stateFriedman
-    
-  }
+  # Create Friedman Table
+  result <- .rmAnovaFriedman(dataset, fullModel, options, perform, status, singular, stateFriedman)
   
-  if (is.null(stateConover)) {
-    
-    result <- .rmAnovaConoverTable(dataset, options, perform, anovaModel$fullModel, status, stateConover, singular)
-    results[["conover"]] <- list(collection=result$result, title = "Conover's Post Hoc Tests")
-    status <- result$status
-    stateConover <- result$stateConover
-    
-  } else {
-    
-    results[["conover"]] <- stateConover
-    
-  }
-  
-  ## Create Assumption Check Object
-  
-  results[["assumptionsObj"]] <- list(title="Assumption Checks", sphericity=resultSphericity, levene=resultLevene)
-  
+  # Create Conover Table
+  result <- .rmAnovaConoverTable(dataset, options, perform, anovaModel$fullModel, status, stateConover, singular)
   
   
   ## Create Contrast Tables
-  
   result <- .rmAnovaContrastTable(options, perform, status, stateContrasts)
-  
-  results[["contrasts"]] <- list(collection=result$result, title = "Contrasts")
-  status <- result$status
-  
   
   
   ## Create Post Hoc Tables
   result <- .rmAnovaPostHocTable(dataset, options, perform, status, statePostHoc)
   
-  results[["posthoc"]] <- list(collection=result$result, title = "Post Hoc Tests")
-  status <- result$status
-  
-  
   ## Create Marginal Means Tables
-  if (is.null(stateMarginalMeans)) {
-    result <- .rmAnovaMarginalMeansTable(dataset, options, perform, status, fullModel)
-    
-    results[["marginalMeans"]] <- list(collection=result$result, title = "Marginal Means")
-    status <- result$status
-    stateMarginalMeans <- result$stateMarginalMeans
-    
-  } else {
-    results[["marginalMeans"]] <- list(collection=stateMarginalMeans, title = "Marginal Means")
-  } 
+  result <- .rmAnovaMarginalMeansTable(dataset, options, perform, status, fullModel)
   
   ## Create Marginal Means via Bootstrapping Tables
-  if(is.null(stateMarginalMeansBoots) && options[['marginalMeansBootstrapping']]){
-    result <- .rmAnovaMarginalMeansBootstrappingTable(dataset, options, perform, status, fullModel)
-    if(result == "Bootstrapping options have changed")
-      return()
-    
-    results[["marginalMeansBoots"]] <- list(collection=result$result, title = "Marginal Means via Bootstrapping")
-    status <- result$status
-    stateMarginalMeansBoots <- result$stateMarginalMeansBoots
-    
-  } else if(options[['marginalMeansBootstrapping']]) {
-    results[["marginalMeansBoots"]] <- list(collection=stateMarginalMeansBoots, title = "Marginal Means via Bootstrapping")
-  }
+  result <- .rmAnovaMarginalMeansBootstrappingTable(dataset, options, perform, status, fullModel)
   
   ## Create Descriptives Table
+  result <- .rmAnovaDescriptivesTable(dataset, options, perform, status, stateDescriptivesTable)
   
-  if (is.null(stateDescriptivesTable)) {
-    
-    result <- .rmAnovaDescriptivesTable(dataset, options, perform, status, stateDescriptivesTable)
-    descriptivesTable <- result$result
-    status <- result$status
-    stateDescriptivesTable <- result$stateDescriptivesTable
-    
-  } else {
-    
-    descriptivesTable <- stateDescriptivesTable
-    
-  }
   
   
   
   ## Create Descriptives Plots
+  result <- .rmAnovaDescriptivesPlot(dataset, options, perform, status, stateDescriptivesPlot)
   
-  titleDescriptivesPlot <- "Descriptives Plots"
+  return()
+}
+
+.getRMAnovaContainer <- function(jaspResults) {
   
-  if (is.null(stateDescriptivesPlot)) {
+  if (!is.null(jaspResults[["rmAnovaContainer"]])) {
     
-    result <- .rmAnovaDescriptivesPlot(dataset, options, perform, status, stateDescriptivesPlot)
-    descriptivesPlot <- result$result
-    status <- result$status
-    stateDescriptivesPlot <- result$stateDescriptivesPlot
-    
-  } else {
-    
-    descriptivesPlot <- stateDescriptivesPlot
-  }
-  
-  if (length(descriptivesPlot) == 1) {
-    
-    results[["descriptivesObj"]] <- list(title="Descriptives", descriptivesTable=descriptivesTable, descriptivesPlot=descriptivesPlot[[1]])
+    anovaContainer <- jaspResults[["rmAnovaContainer"]]
     
   } else {
     
-    results[["descriptivesObj"]] <- list(title="Descriptives", descriptivesTable=descriptivesTable, descriptivesPlot=list(collection=descriptivesPlot, title = titleDescriptivesPlot))
+    anovaContainer <- createJaspContainer(title = "Repeated Measures ANOVA")
+    # we set the dependencies on the container, this means that all items inside the container automatically have these dependencies
+    anovaContainer$dependOn(c("withinModelTerms", "betweenModelTerms", "repeatedMeasuresCells", 
+                              "repeatedMeasuresFactors", "covariates", "sumOfSquares"))
+    jaspResults[["rmAnovaContainer"]] <- anovaContainer
   }
   
+  return(anovaContainer)
   
+}
+
+.rmAnovaCheckErrors <- function(dataset, options, ready) {
+  if (!ready) return()
   
-  ## META definitions
+  modelTerms <- unlist(options$withinModelTerms, recursive = FALSE)
+  betweenModelTerms <- options$betweenModelTerms
   
-  .meta <- list(
-    list(name="withinSubjectsEffects", type="table"),
-    list(name="betweenSubjectsEffects", type="table"),
-    list(name="assumptionsObj", type="object", meta=list(list(name="sphericity", type="table"), list(name="levene", type="table"))),
-    list(name="contrasts", type="collection", meta="table"),
-    list(name="posthoc", type="collection", meta="table"),
-    list(name="marginalMeans", type="collection", meta="table"),
-    list(name="marginalMeansBoots", type="collection", meta="table"),
-    list(name="simpleEffects", type="table"),
-    list(name="friedman", type="table"),
-    list(name="conover", type="collection", meta="table")
-  )
-  
-  if (length(descriptivesPlot) == 1) {
-    
-    .meta[[length(.meta) + 1]] <- list(name="descriptivesObj", type="object", meta=list(list(name="descriptivesTable", type="table"), list(name="descriptivesPlot", type="image")))
-    
-  } else {
-    
-    .meta[[length(.meta) + 1]] <- list(name="descriptivesObj", type="object", meta=list(list(name="descriptivesTable", type="table"), list(name="descriptivesPlot", type="collection", meta="image")))
-    
+  for(betweenTerm in rev(betweenModelTerms)) {
+    .hasErrors(
+      dataset = dataset, 
+      type = c('observations', 'variance', 'infinity'),
+      all.target = c(options$repeatedMeasuresCells, options$covariates), 
+      all.grouping = betweenTerm,
+      observations.amount = "< 2", 
+      exitAnalysisIfErrors = TRUE)
   }
   
-  results[[".meta"]] <- .meta
-  
-  
-  
-  ## Save State
-  
-  # anovaModel$fullModel <- NULL
-  state[["model"]] <- anovaModel
-  state[["options"]] <- options
-  state[["stateDescriptivesPlot"]] <- stateDescriptivesPlot
-  state[["stateDescriptivesTable"]] <- stateDescriptivesTable
-  state[["stateLevene"]] <- stateLevene
-  state[["statePostHoc"]] <- statePostHoc
-  state[["stateMarginalMeans"]] <- stateMarginalMeans
-  state[["stateMarginalMeansBoots"]] <- stateMarginalMeansBoots
-  state[["stateContrasts"]] <- stateContrasts
-  state[["stateSphericity"]] <- stateSphericity
-  state[["stateSimpleEffects"]] <- stateSimpleEffects
-  state[["stateFriedman"]] <- stateFriedman
-  state[["stateConover"]] <- stateConover
-  
-  keepDescriptivesPlot <- lapply(stateDescriptivesPlot, function(x)x$data)
-  
-  
-  
-  if (perform == "init" && status$ready && status$error == FALSE) {
-    
-    return(list(results=results, status="inited", state=state, keep=keepDescriptivesPlot))
-    
-  } else {
-    
-    return(list(results=results, status="complete", state=state, keep=keepDescriptivesPlot))
+  for(betweenTerm in rev(betweenModelTerms)) {
+    .hasErrors(
+      dataset = dataset, 
+      type = c('infinity', 'factorLevels'),
+      all.target = betweenTerm, 
+      factorLevels.amount  = "< 2",
+      exitAnalysisIfErrors = TRUE)
   }
+  
+}
+
+.rmAnovaModelContainer <- function(rmAnovaContainer, dataset, options, ready) {
+  if (!ready) return()
+  
+  # Take results from state if possible
+  if (!is.null(rmAnovaContainer[["anovaResult"]]))
+    return()
+  
+  rmAnovaResult <- .rmAnovaModel(dataset, options)
+  
+  if (class(rmAnovaResult$tryResult) == "try-error") {
+    rmAnovaContainer$setError("Some parameters are not estimable, most likely due to empty cells of the design.")
+    return()
+  }
+  
+  # Save model to state
+  rmAnovaContainer[["anovaResult"]] <- createJaspState(object = rmAnovaResult)
 }
 
 .rmAnovaCheck <- function(dataset, options, perform) {
@@ -560,16 +296,16 @@ AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback
   
   main <- paste("(",paste(unlist(terms.base64), collapse=" + "),")", sep="")
   termsBS <- paste("(",paste(termsBS.base64, collapse=" + "),")", sep="")
-  errorRM <- paste("Error(",paste("subject/(", termsRM.base64, ")",sep="", collapse=" + "),")",sep="")
+  errorRM <- paste("Error(",paste("Xc3ViamVjdA/(", termsRM.base64, ")",sep="", collapse=" + "),")",sep="")
   
   if (is.null(termsBS.base64) && is.null(termsRM.base64)) {
-    model.def <- dependent ~ 1
+    model.def <- XZGVwZW5kZW50 ~ 1
   } else if (is.null(termsBS.base64)) {
-    model.def <- paste("dependent", "~", paste(main, errorRM, sep=" + "))
+    model.def <- paste("XZGVwZW5kZW50", "~", paste(main, errorRM, sep=" + "))
   } else if (is.null(termsRM.base64)) {
-    model.def <- paste("dependent", "~", main)
+    model.def <- paste("XZGVwZW5kZW50", "~", main)
   } else {
-    model.def <- paste("dependent", "~", paste(main, errorRM, termsBS, sep=" + "))
+    model.def <- paste("XZGVwZW5kZW50", "~", paste(main, errorRM, termsBS, sep=" + "))
   }
   
   list(model.def = model.def, terms.normal = terms.normal, terms.base64 = terms.base64, termsRM.normal = termsRM.normal, termsRM.base64 = termsRM.base64)
@@ -579,9 +315,10 @@ AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback
   
   modelDef <- .rmModelFormula(options)
   model.formula <- as.formula(modelDef$model.def)
-  
-  dataset <- .shortToLong(dataset, options$repeatedMeasuresFactors, options$repeatedMeasuresCells, c(options$betweenSubjectFactors, options$covariates))
-  
+
+  # dataset <- .shortToLong(dataset, options$repeatedMeasuresFactors, options$repeatedMeasuresCells, 
+  #                         c(options$betweenSubjectFactors, options$covariates))
+  # 
   variables <- unlist(c(options$betweenSubjectFactors, lapply(options$repeatedMeasuresFactors, function(x) x$name)))
   
   for (i in variables)
@@ -599,61 +336,54 @@ AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback
   )
   if (options$sumOfSquares == "type1") {
     
-    result <- try(stats::aov(model.formula, data=dataset), silent = TRUE)
-    fullModel <- try(afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE), silent = TRUE)
-    
+    tryResult <- try({
+      result <- stats::aov(model.formula, data=dataset)
+      model <- summary(result)
+      result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
+      summaryResult <- summary(result)})
+
   } else if (options$sumOfSquares == "type2") {
-    
-    result <- try(afex::aov_car(model.formula, data=dataset, type= 2, factorize = FALSE), silent = TRUE)
-    
-  } else {
-    
-    result <- try(afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE), silent = TRUE)
-  }
-  
-  model <- NULL
-  epsilon <- NULL
-  mauchly <- NULL
-  
-  if (length(class(result)) == 1 && class(result) == "try-error") {
-    
-    fullModel <- result
-    
-    status$error <- TRUE
-    status$errorMessage <- .extractErrorMessage(result)
-    
-    if (status$errorMessage == "Some parameters are not estimable, most likely due to empty cells of the design (i.e., structural missings). Check your data.") {
-      
-      status$errorMessage <- "Some parameters are not estimable, most likely due to empty cells of the design."
-      
-    }
-    
-  } else {
-
-    if (options$sumOfSquares == "type1" && class(fullModel) != "try-error") {
-      
-      model <- summary(result)
-      epsilon <- list()
-      epsilon[['epsilon']] <- summary(fullModel)$pval.adjustments
-      epsilon[['univarTests']] <-  summary(fullModel)[['univariate.tests']]
-      mauchly <- summary(fullModel)$sphericity.tests
-
-    } else if (options$sumOfSquares == "type1" && class(fullModel) == "try-error") {
-      
-      model <- summary(result)
-      
-    } else {
-      
+    tryResult <- try({
+      result <- afex::aov_car(model.formula, data=dataset, type= 2, factorize = FALSE)
       summaryResult <- summary(result)
-      model <- summaryResult$univariate.tests
-      epsilon <- summaryResult$pval.adjustments
-      mauchly <- summaryResult$sphericity.tests
-      fullModel <- result
-      
-    }
+      model <- summaryResult$univariate.tests})
+    
+  } else {
+    tryResult <- try({
+      result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
+      summaryResult <- summary(result)
+      model <- summaryResult$univariate.tests})
+    
   }
+
   
-  list(model = model, epsilon = epsilon, mauchly = mauchly, fullModel = fullModel, status = status)
+  return(list(model = model, epsilon = summaryResult$pval.adjustments, mauchly = summaryResult$sphericity.tests, 
+              fullModel = result, tryResult = tryResult))
+  
+  # if (length(class(result)) == 1 && class(result) == "try-error") {
+  #   
+  #     status$errorMessage <- "Some parameters are not estimable, most likely due to empty cells of the design."
+  #     
+  # } else {
+  # 
+  #   if (options$sumOfSquares == "type1" && class(fullModel) != "try-error") {
+  #     
+  #     model <- summary(result)
+  #     # epsilon <- list()
+  #     # epsilon[['epsilon']] <- summary(fullModel)$pval.adjustments
+  #     # epsilon[['univarTests']] <-  summary(fullModel)[['univariate.tests']]
+  #     # mauchly <- summary(fullModel)$sphericity.tests
+  # 
+  #   } else if (options$sumOfSquares == "type1" && class(fullModel) == "try-error") {
+  #     
+  #     model <- summary(result)
+  #     
+  #   } else {
+      
+ 
+      
+  #   }
+
 }
 
 .resultsSphericity <- function(options, epsilon, mauchly, model) {
@@ -741,7 +471,12 @@ AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback
   return(epsilonTable)
 }
 
-.referenceGrid <- function (options, fullModel) {
+.referenceGrid <- function (rmAnovaContainer, options, ready) {
+  if (!is.null(rmAnovaContainer[["referenceGrid"]]) || !ready)
+    return()
+  
+  fullModel <- rmAnovaContainer[["anovaResult"]]$object$fullModel 
+  
   referenceGridList <- list()
   variables <- unlist(c(lapply(options$betweenModelTerms, 
                                function(x) {
@@ -774,10 +509,16 @@ AnovaRepeatedMeasures <- function(dataset=NULL, options, perform="run", callback
     
   }
   
-  return(referenceGridList)
+  rmAnovaContainer[["referenceGrid"]] <- createJaspState(object = referenceGridList)
+  
+  return()
 }
 
 .resultsPostHoc <- function (referenceGrid, options, dataset, fullModel) {
+  
+  referenceGrid <- rmAnovaContainer[["referenceGrid"]]$object
+  fullModel <- rmAnovaContainer[["anovaResult"]]$object$fullModel
+  
   resultsPostHoc <- list()
   
   postHocData <- fullModel$data$wide

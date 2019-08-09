@@ -56,29 +56,13 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   ## Create ANOVA Table
   .anovaTable(anovaContainer, options, ready)
   
-  ## Create Levene's Table
-  .anovaLevenesTable(anovaContainer, dataset, options, ready)
-
-  ## Create qq-plot of residuals
-  .qqPlot(anovaContainer, dataset, options, ready)
-  
-  ## Create Descriptives Table
-  # .anovaDescriptivesTable(anovaContainer, dataset, options, ready)
-
+  ## Create Descriptives Container
   options[["credibleInterval"]] <- 0.95
   .BANOVAdescriptives(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
-  # .BANOVAdescriptivesTable(anovaContainer, dataset, options, list(noVariables=FALSE), "ANCOVA")
   
-  ## Create Descriptives Plot
-  # .anovaDescriptivesPlot(anovaContainer, dataset, options, ready)
-  # .BANOVAdescriptivesPlots(anovaContainer, dataset, options, list(noVariables = !ready), analysisType = "Ancova")
+  ## Create Assumptions Table for Levene and Q-Q plots
+  .anovaAssumptionsContainer(anovaContainer, dataset, options, ready)
   
-  ## Create Kruskal Table
-  .anovaKruskal(anovaContainer, dataset, options, ready)
-  
-  ## Create Simple Effects Table
-  .anovaSimpleEffects(anovaContainer, dataset, options, ready)
-
   ## Create Contrasts Table
   .anovaContrastsTable(anovaContainer, dataset, options, ready)
   
@@ -87,6 +71,13 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   ## Create Marginal Means Table
   .anovaMarginalMeans(anovaContainer, dataset, options, ready)
+
+  ## Create Simple Effects Table
+  .anovaSimpleEffects(anovaContainer, dataset, options, ready)
+  
+  ## Create Kruskal Table
+  .anovaKruskal(anovaContainer, dataset, options, ready)
+  
   
   return()
   
@@ -793,6 +784,7 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   for (postHocVarIndex in 1:length(postHocVariables)) {
     
     thisVarName <- paste(postHocVariables[[postHocVarIndex]], collapse = " \u273B ")
+    interactionTerm <- length(postHocVariables[[postHocVarIndex]]) > 1
     postHocInterval  <- options$confidenceIntervalIntervalPostHoc
 
     postHocRef <- emmeans::lsmeans(model, postHocVariablesListV)
@@ -901,12 +893,12 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
     if (options$postHocFlagSignificant) {
       for (i in 3:1) {
         signifComparisons <- rownames(resultPostHoc)[resultPostHoc$p.value < c(0.05, 0.01, 0.001)[i]]
-        if (length(signifComparisons) > 0)
+        if (length(signifComparisons) > 0) {
           colNames <- rep("tukey", length(signifComparisons))
           postHocStandardContainer[[thisVarName]]$addFootnote(message = "p < .05, ** p < .01, *** p < .001", 
                                                               colNames = colNames, rowNames = signifComparisons,
                                                               symbol = paste0(rep("*", i), collapse = ""))
-
+        }
       }
     }
     
@@ -1295,10 +1287,26 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   return()
 }
 
-.anovaLevenesTable <- function(anovaContainer, dataset, options, ready) {
-  if (options$homogeneityTests == FALSE || !is.null(anovaContainer[["leveneTable"]]) || !ready)
-    return ()
+.anovaAssumptionsContainer <- function(anovaContainer, dataset, options, ready) {
+  if (!is.null(anovaContainer[["assumptionsContainer"]]))
+    return()
   
+  assumptionsContainer <- createJaspContainer(title = "Assumption Checks",
+                                              dependencies = c("homogeneityTests", "qqPlot"))
+
+  anovaContainer[["assumptionsContainer"]] <- assumptionsContainer
+  
+  if (options$homogeneityTests == TRUE)
+    .anovaLevenesTable(anovaContainer, dataset, options, ready)
+  
+  if (options$qqPlot == TRUE)
+    .qqPlot(anovaContainer, dataset, options, ready)
+  
+  return()
+}
+
+.anovaLevenesTable <- function(anovaContainer, dataset, options, ready) {
+
   leveneTable <- createJaspTable(title = "Test for Equality of Variances (Levene's)")
 
   leveneTable$addColumnInfo(name="F", type="number")
@@ -1314,7 +1322,10 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
   
   leveneTable$showSpecifiedColumnsOnly <- TRUE
   
-  anovaContainer[["leveneTable"]] <- leveneTable
+  anovaContainer[["assumptionsContainer"]][["leveneTable"]] <- leveneTable
+  
+  if (!ready)
+    return()
   
   # Start Levene computations
   model <- anovaContainer[["model"]]$object
@@ -1531,14 +1542,17 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 }
 
 .anovaSimpleEffects <- function(anovaContainer, dataset, options, ready) {
-  if (!is.null(anovaContainer[["simpleEffectsTable"]]) || identical(options$simpleFactor, "") || 
+  if (!is.null(anovaContainer[["simpleEffectsContainer"]]) || identical(options$simpleFactor, "") || 
       identical(options$moderatorFactorOne, ""))
     return()
   
+  anovaContainer[["simpleEffectsContainer"]] <- createJaspContainer(title = "Simple Main Effects",
+                                                                    dependencies = c("simpleFactor", 
+                                                                                     "moderatorFactorOne", 
+                                                                                     "moderatorFactorTwo"))
   simpleEffectsTable <- createJaspTable(title = paste0("Simple Main Effects - ", options$simpleFactor))
-  simpleEffectsTable$dependOn(c("simpleFactor", "moderatorFactorOne", "moderatorFactorTwo"))
-  
-  anovaContainer[["simpleEffectsTable"]] <- simpleEffectsTable
+
+  anovaContainer[["simpleEffectsContainer"]][["simpleEffectsTable"]] <- simpleEffectsTable
   
   moderatorTerms <- c(options$moderatorFactorOne, options$moderatorFactorTwo[!identical(options$moderatorFactorTwo, "")])
   nMods <- length(moderatorTerms)
@@ -1639,14 +1653,15 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 }
 
 .anovaKruskal <- function(anovaContainer, dataset, options, ready) {
-  if (!is.null(anovaContainer[["kruskalTable"]]) || !length(options$kruskalVariablesAssigned))
+  if (!is.null(anovaContainer[["kruskalContainer"]]) || !length(options$kruskalVariablesAssigned))
     return()
   
   
+  anovaContainer[["kruskalContainer"]] <- createJaspContainer(title = "Kruskal-Wallis Test",
+                                                              dependencies = "kruskalVariablesAssigned")
   kruskalTable <- createJaspTable(title = "Kruskal-Wallis Test")
-  kruskalTable$dependOn("kruskalVariablesAssigned")
-  
-  anovaContainer[["kruskalTable"]] <- kruskalTable
+
+  anovaContainer[["kruskalContainer"]][["kruskalTable"]] <- kruskalTable
   
   kruskalTable$addColumnInfo(name = "Factor", type = "string")
   kruskalTable$addColumnInfo(name = "Statistic", type = "number")
@@ -1675,17 +1690,12 @@ Ancova <- function(jaspResults, dataset = NULL, options) {
 }
 
 .qqPlot <- function(anovaContainer, dataset, options, ready) {
-  if (options$qqPlot == FALSE || !is.null(anovaContainer[["qqPlot"]]))
-    return()
-  
-  # now create the jaspPlot object
+
+  # create the jaspPlot object
   qqPlot <- createJaspPlot(title = "Q-Q Plot", width = options$plotWidthQQPlot, height = options$plotHeightQQPlot)
   
-  # set dependencies
-  qqPlot$dependOn(c("qqPlot"))
-  
   # now we assign the plot to jaspResults
-  anovaContainer[["qqPlot"]] <- qqPlot
+  anovaContainer[["assumptionsContainer"]][["qqPlot"]] <- qqPlot
   
   if (!ready)
     return()

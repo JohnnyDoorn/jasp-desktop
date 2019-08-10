@@ -26,7 +26,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
                                  exclude.na.listwise=c(numericVariables, factorVariables))
   
   longData <- .BANOVAreadRManovaData(dataset, options)
-  
+
   ready <- length(options$repeatedMeasuresCells) > 1 &&  length(options$withinModelTerms) > 0
   
   ## Error checking
@@ -38,10 +38,23 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
 
   .rmAnovaModelContainer(rmAnovaContainer, longData, options, ready)
   
+  ## Create Within Subjects Effects Table
+  .rmAnovaWithinSubjectsTable(rmAnovaContainer, options, dataset, ready)  
+  
+  return()
+  
   .referenceGrid(rmAnovaContainer, options, ready)
   
   .resultsPostHoc(rmAnovaContainer, options, dataset, ready)
   
+  .resultsContrasts(rmAnovaContainer, options, dataset, ready)
+  
+  .resultsSphericity(rmAnovaContainer, options, dataset, ready)
+  
+  return()
+  
+  ## Create Between Subjects Effects Table
+  result <- .rmAnovaBetweenSubjectsTable(rmAnovaContainer, options, dataset, ready)
   return()
   
   # Descriptives
@@ -50,21 +63,13 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   # plotDepends <- c("plotHorizontalAxis", "plotSeparateLines", "plotSeparatePlots", "plotErrorBars", "usePooledStandErrorCI")
   
   
-  anovaModel <- .rmAnovaModel(dataset, options, status)
+  # anovaModel <- .rmAnovaModel(dataset, options, status)
   
-  
-  statePostHoc <- .resultsPostHoc(referenceGrid, options, dataset, fullModel)
-  stateContrasts <- .resultsContrasts(dataset, options, referenceGrid)
-  stateSphericity <- .resultsSphericity(options, epsilon, mauchly, model)
-  
-  
-  
-  
-  ## Create Within Subjects Effects Table
-  result <- .rmAnovaWithinSubjectsTable(dataset, options, perform, model, stateSphericity, status, fullModel)
+
+
   
   ## Create Between Subjects Effects Table
-  result <- .rmAnovaBetweenSubjectsTable(dataset, options, perform, model, status, fullModel)
+  result <- .rmAnovaBetweenSubjectsTable(rmAnovaContainer, options, dataset, ready)
   
   ## Create Sphericity Assumption Table
   result <- .sphericityTest(options, stateSphericity, perform, status)
@@ -167,7 +172,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   
   rmAnovaResult <- .rmAnovaModel(dataset, options)
   
-  if (class(rmAnovaResult$tryResult) == "try-error") {
+  if (rmAnovaResult[["tryResult"]] == "try-error") {
     rmAnovaContainer$setError("Some parameters are not estimable, most likely due to empty cells of the design.")
     return()
   }
@@ -334,59 +339,182 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
     lmer_function = "lmerTest", method_mixed = "KR", return_aov = "afex_aov", 
     set_data_arg = FALSE, sig_symbols = c(" +", " *", " **", " ***"), type = 3
   )
+  
+  # Computations:
   if (options$sumOfSquares == "type1") {
     
     tryResult <- try({
       result <- stats::aov(model.formula, data=dataset)
-      model <- summary(result)
+      summaryResultOne <- summary(result)
+      
       result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
-      summaryResult <- summary(result)})
-
+      summaryResult <- summary(result)
+      
+      # Reformat the results to make it consistent with types 2 and 3
+      model <- matrix(ncol = 7, nrow = nrow(summaryResult$univariate.tests)-1)
+      colnames(model) <- c("num Df", "Sum Sq", "Mean Sq", "F value", "Pr(>F)", "Error SS", "den Df")
+      model <- as.data.frame(model)
+      termNames <- character(nrow(model))
+      counter <- 1
+      for (i in 1:length(summaryResultOne)) {
+        for(j in 1:(nrow(summaryResultOne[[i]][[1]])-1)) {
+          model[counter, 1:5] <- summaryResultOne[[i]][[1]][j, 1:5]
+          model[counter, 6] <-  summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Sum Sq"]
+          model[counter, 7] <- summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Df"]
+          termNames[counter] <- row.names(summaryResultOne[[i]][[1]][j,])
+          counter <- counter + 1
+        }
+      }
+      rownames(model) <- termNames
+    })
+    
   } else if (options$sumOfSquares == "type2") {
+    
     tryResult <- try({
       result <- afex::aov_car(model.formula, data=dataset, type= 2, factorize = FALSE)
       summaryResult <- summary(result)
-      model <- summaryResult$univariate.tests})
+      model <- as.data.frame(unclass(summaryResult$univariate.tests)[-1, ])
+    })
     
   } else {
+    
     tryResult <- try({
       result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
       summaryResult <- summary(result)
-      model <- summaryResult$univariate.tests})
+      model <- as.data.frame(unclass(summaryResult$univariate.tests)[-1, ])
+    })
+    
+  }
+  
+  if (class(tryResult) == "try-error") {
+    return(list(tryResult == "try-error"))
+  }
+
+  # Now we reformat the results table some more to make it flow with jaspResults later
+  rownames(model) <- trimws(rownames(model))
+  model[["isWithinTerm"]] <- model[[".isNewGroup"]] <- numeric(nrow(model))
+  
+  sortedModel <- model
+  orderedCases <- character(nrow(model))
+  
+  cases <- sapply(modelDef$terms.base64, function(x) x[[1]])
+  residualResults <- sortedModel[cases, ]
+  options$betweenModelTerms
+  counter <- 1
+  nextNewGroup <- 0
+  for (modelTerm in modelDef$terms.base64) {
+    
+    isWithin <- any(modelTerm %in% modelDef$termsRM.base64)
+    indices <- .mapAnovaTermsToTerms(modelTerm, rownames(model))
+    nextNewGroup <- c(TRUE, rep(FALSE, length(indices) - 1))
+    sortedModel[indices, ] <- model[indices, ]
+    sortedModel[indices, c(".isNewGroup", "isWithinTerm")] <- c(nextNewGroup, rep(isWithin, length(indices)))
+
+    residualResults[modelTerm[[1]], ] <- c(model[indices[1],  c("Error SS", "den Df")], rep(NA, 4), 0, isWithin) 
+
     
   }
 
+  sortedModel[["case"]] <- unlist(modelDef$terms.normal)
+  rownames(sortedModel) <- unlist(modelDef$terms.base64)
+  rownames(residualResults) <- cases
+  sortedModel[["Mean Sq"]] <- sortedModel[["Sum Sq"]] / sortedModel[["num Df"]]
+  residualResults[["Mean Sq"]] <- residualResults[["Sum Sq"]] / residualResults[["num Df"]]
   
-  return(list(model = model, epsilon = summaryResult$pval.adjustments, mauchly = summaryResult$sphericity.tests, 
-              fullModel = result, tryResult = tryResult))
+  # Now we calculate effect sizes
+  SSr <- sortedModel[["Error SS"]]
+  MSr <- SSr/sortedModel[["den Df"]]
   
-  # if (length(class(result)) == 1 && class(result) == "try-error") {
-  #   
-  #     status$errorMessage <- "Some parameters are not estimable, most likely due to empty cells of the design."
-  #     
-  # } else {
-  # 
-  #   if (options$sumOfSquares == "type1" && class(fullModel) != "try-error") {
-  #     
-  #     model <- summary(result)
-  #     # epsilon <- list()
-  #     # epsilon[['epsilon']] <- summary(fullModel)$pval.adjustments
-  #     # epsilon[['univarTests']] <-  summary(fullModel)[['univariate.tests']]
-  #     # mauchly <- summary(fullModel)$sphericity.tests
-  # 
-  #   } else if (options$sumOfSquares == "type1" && class(fullModel) == "try-error") {
-  #     
-  #     model <- summary(result)
-  #     
-  #   } else {
-      
- 
-      
-  #   }
+  sortedModel[["eta"]] <- sortedModel[["Sum Sq"]] / (sum(sortedModel[["Sum Sq"]]) + sum(residualResults[["Sum Sq"]]))
+  sortedModel[["etaPart"]] <- sortedModel[["Sum Sq"]] / (sortedModel[["Sum Sq"]] + SSr)
+  sortedModel[["genEta"]] <- result[["anova_table"]]["ges"]
+  
+  n <- nrow(dataset)
+  df <- sortedModel[["num Df"]]
+  MSm <- sortedModel[["Mean Sq"]]
+  MSb <- residualResults[["Mean Sq"]][residualResults[["isWithinTerm"]] == 0]
+  
+  # MSb <- result[1, 'Error SS'] / (n - 1) # or  result["Error: subject"][[1]][[1]]$`Mean Sq`
+  sortedModel[["omega"]] <- (df / (n * (df + 1)) * (MSm - MSr)) / (MSr + ((MSb - MSr) / (df + 1)) + 
+                                                                     (df / (n * (df + 1))) * (MSm - MSr))
+  
+  # Now we include the results from the corrections
+  corrections <- summaryResult$pval.adjustments
+  withinAnovaTable <- subset(sortedModel, isWithinTerm == TRUE)
+  withinIndices <- .mapAnovaTermsToTerms(rownames(sortedModel), rownames(corrections))
+  
+  withinAnovaTable[["dfGG"]] <- withinAnovaTable[["num Df"]] * corrections[withinIndices, "GG eps"]
+  withinAnovaTable[["MSGG"]] <- withinAnovaTable[["Sum Sq"]] / withinAnovaTable[["dfGG"]]
+  withinAnovaTable[["dfRGG"]] <- withinAnovaTable[["den Df"]] * corrections[withinIndices, "GG eps"]
+  withinAnovaTable[["pGG"]] <-  pf(withinAnovaTable[["F value"]], withinAnovaTable[["dfGG"]], 
+                                   withinAnovaTable[["dfRGG"]], lower.tail = FALSE)
+  
+  wResidualResults <- subset(residualResults, isWithinTerm == TRUE)
+  residualIndices <- .mapAnovaTermsToTerms(rownames(wResidualResults), rownames(corrections))
+  wResidualResults[["dfGG"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "GG eps"]
+  wResidualResults[["MSGG"]] <- wResidualResults[["Sum Sq"]] / wResidualResults[["dfGG"]]
+  
+  
+  withinAnovaTable[["dfHF"]] <- withinAnovaTable[["num Df"]] * corrections[, "HF eps"]
+  withinAnovaTable[["MSHF"]] <- withinAnovaTable[["Sum Sq"]] / withinAnovaTable[["dfHF"]]
+  withinAnovaTable[["dfRHF"]] <- withinAnovaTable[["den Df"]] * corrections[, "HF eps"]
+  withinAnovaTable[["pHF"]] <-  pf(withinAnovaTable[["F value"]], withinAnovaTable[["dfHF"]], 
+                                   withinAnovaTable[["dfRHF"]], lower.tail = FALSE)
+  
+  wResidualResults[["dfHF"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "HF eps"]
+  wResidualResults[["MSHF"]] <- wResidualResults[["Sum Sq"]] / wResidualResults[["dfHF"]]
+  wResidualResults[["case"]] <- "Residuals"
+  
+  withinAnovaTable[["correction"]] <- "None"
+  
+  ggTable <- withinAnovaTable
+  ggTable[["Mean Sq"]] <- withinAnovaTable[["MSGG"]]
+  ggTable[["den Df"]] <- withinAnovaTable[["dfGG"]]
+  ggTable[["num Df"]] <- withinAnovaTable[["dfRGG"]]
+  ggTable[["Pr(>F)"]] <- withinAnovaTable[["pGG"]]
+  ggTable[["correction"]] <-  "Greenhouse-Geisser"
 
+  hfTable <- withinAnovaTable
+  hfTable[["Mean Sq"]] <- withinAnovaTable[["MSGG"]]
+  hfTable[["den Df"]] <- withinAnovaTable[["dfGG"]]
+  hfTable[["num Df"]] <- withinAnovaTable[["dfRGG"]]
+  hfTable[["Pr(>F)"]] <- withinAnovaTable[["pGG"]]
+  hfTable[["correction"]] <-  "Huyn-Feldt"
+
+  withinAnovaTableCollection <- list("None" = withinAnovaTable,"Huyn-Feldt" = hfTable, "Greenhouse-Geisser" = ggTable)
+
+  return(list(anovaResult = sortedModel, 
+              residualTable = wResidualResults, 
+              withinAnovaTable = withinAnovaTableCollection,
+              mauchly = summaryResult$sphericity.tests, 
+              fullModel = result, 
+              tryResult = tryResult))
 }
 
-.resultsSphericity <- function(options, epsilon, mauchly, model) {
+.mapAnovaTermsToTerms <- function(oneTerms, twoTerms) {
+  nTerms <- length(oneTerms)
+  indices <- numeric(nTerms)
+  counter <- 1
+  
+  for (i in 1:nTerms) {
+    splitFirst <- strsplit(oneTerms[[i]],":")[[1]]
+    for (j in 1:length(twoTerms)) {
+      matchedTerms <- match(splitFirst, strsplit(twoTerms[[j]],":")[[1]])
+      if ((length(strsplit(twoTerms[[j]],":")[[1]]) == length(splitFirst)) && !any(is.na(matchedTerms))) {
+        indices[counter] <- j
+        counter <- counter + 1
+      }
+    }
+  }
+  
+  return(indices)
+}
+
+.resultsSphericity <- function(rmAnovaContainer, dataset, options) {
+  
+  epsilon <- rmAnovaContainer[["epsilon"]]$object
+  mauchly <- rmAnovaContainer[["mauchly"]]$object
+  model <- rmAnovaContainer[["model"]]$object
   
   modelDef <- .rmModelFormula(options)
   termsRM.base64 <- modelDef$termsRM.base64
@@ -514,7 +642,9 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   return()
 }
 
-.resultsPostHoc <- function (referenceGrid, options, dataset, fullModel) {
+.resultsPostHoc <- function (rmAnovaContainer, options, dataset, ready) {
+  if(!ready)
+    return()
   
   referenceGrid <- rmAnovaContainer[["referenceGrid"]]$object
   fullModel <- rmAnovaContainer[["anovaResult"]]$object$fullModel
@@ -617,8 +747,12 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   return(resultsPostHoc)
 }
 
-.resultsContrasts <- function (dataset, options, referenceGrid) {
+.resultsContrasts <- function (rmAnovaContainer, options, dataset, ready) {
+  if(!ready)
+    return()
   
+  referenceGrid <- rmAnovaContainer[["referenceGrid"]]$object
+
   resultsContrasts <- list()
   datasetLong <- .shortToLong(dataset, options$repeatedMeasuresFactors, options$repeatedMeasuresCells, options$betweenSubjectFactors)
   
@@ -723,7 +857,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   }
 }
 
-.rmAnovaBetweenSubjectsTable <- function(dataset, options, perform, model, status, fullModel) {
+.rmAnovaBetweenSubjectsTable <- function(rmAnovaContainer, options, dataset, ready) {
   
   anova <- list()
   
@@ -1029,667 +1163,87 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   list(result = anova, status = status)
 }
 
-.rmAnovaWithinSubjectsTable <- function(dataset, options, perform, model, stateSphericity, status, fullModel) {
+.rmAnovaWithinSubjectsTable <- function(rmAnovaContainer, options, dataset, ready) {
+  if (!is.null(rmAnovaContainer[["withinAnovaTable"]]))
+    return()
   
-  anova <- list()
-  
-  anova[["title"]] <- "Within Subjects Effects"
-  
-  corrections <- NULL
+  anovaTable <- createJaspTable(title = "Within Subjects Effects", position = 1)
+  rmAnovaContainer[["withinAnovaTable"]] <- anovaTable
+  anovaTable$showSpecifiedColumnsOnly <- TRUE
   
   if (options$sphericityCorrections) {
-    
-    if (options$sphericityNone) {
-      corrections <- c(corrections, "None")
-    }
-    
-    if (options$sphericityGreenhouseGeisser) {
-      corrections <- c(corrections, "Greenhouse-Geisser")
-    }
-    
-    if (options$sphericityHuynhFeldt) {
-      corrections <- c(corrections, "Huynh-Feldt")
-    }
+    corrections <- c("None", "Greenhouse-Geisser", "Huyn-Feldt")[c(options$sphericityNone, 
+                                                                 options$sphericityGreenhouseGeisser,
+                                                                 options$sphericityHuynhFeldt)]
+  } else 
+    corrections <- "None"
+  
+  anovaTable$addColumnInfo(title = "Cases", name = "case", type = "string", combine = TRUE)
+  
+  dfType <- "integer" # Make df an integer unless corrections are applied
+  if ((length(corrections) > 1 || any(!"None" %in% corrections)) && options$sphericityCorrections) {
+    anovaTable$addColumnInfo(title = "Sphericity Correction", name = "correction", type = "string", combine = TRUE)
+    dfType <- "number"
   }
   
-  fields <- list()
-  footnotes <- .newFootnotes()
-  
-  fields[[length(fields) + 1]] <- list(name="case", type="string", title="", combine=TRUE)
-  
-  if (options$sphericityCorrections && !is.null(corrections))
-    fields[[length(fields) + 1]] <- list(name="cor", type="string", title="Sphericity Correction")
-  
-  fields[[length(fields) + 1]] <- list(name="SS", type="number", format="sf:4;dp:3", title="Sum of Squares")
-  
-  if (options$sphericityCorrections && !is.null(corrections)) {
-    fields[[length(fields) + 1]] <- list(name="df", type="number", format="sf:4;dp:3")
-  } else {
-    fields[[length(fields) + 1]] <- list(name="df", type="integer")
-  }
-  
-  fields[[length(fields) + 1]] <- list(name="MS", type="number", format="sf:4;dp:3", title="Mean Square")
-  fields[[length(fields) + 1]] <- list(name="F", type="number", format="sf:4;dp:3")
-  fields[[length(fields) + 1]] <- list(name="p", type="number", format="dp:3;p:.001")
+  anovaTable$addColumnInfo(title = "Sum of Squares", name = "Sum Sq", type = "number")
+  anovaTable$addColumnInfo(title = "df", name = "den Df", type = dfType)
+  anovaTable$addColumnInfo(title = "Mean Square", name = "Mean Sq", type = "number")
+  anovaTable$addColumnInfo(title = "F", name = "F value", type = "number")
+  anovaTable$addColumnInfo(title = "p", name = "Pr(>F)", type = "number")
   
   if (options$VovkSellkeMPR) {
-    fields[[length(fields) + 1]] <- list(name = "VovkSellkeMPR",
-                                         title = "VS-MPR\u002A",
-                                         type = "number",
-                                         format = "sf:4;dp:3")
+    table$addColumnInfo(title = "VS-MPR\u002A", name = "VovkSellkeMPR", type = "number")
+    table$addFootnote(message = .messages("footnote", "VovkSellkeMPR"), symbol = "\u002A")
   }
   
   if (options$effectSizeEstimates) {
     
-    if(options$effectSizeEtaSquared) {
-      fields[[length(fields) + 1]] <- list(name="eta", type="number", title="\u03B7\u00B2", format="dp:3")
+    if (options$effectSizeEtaSquared) {
+      anovaTable$addColumnInfo(title = "\u03B7\u00B2", name = "eta", type = "number")
     }
-    if(options$effectSizePartialEtaSquared) {
-      fields[[length(fields) + 1]] <- list(name="partialEta", type="number", title="\u03B7\u00B2\u209A", format="dp:3")
+    
+    if (options$effectSizePartialEtaSquared) {
+      anovaTable$addColumnInfo(title = "\u03B7\u00B2\u209A", name = "etaPart", type = "number")
     }
+    
     if(options$effectSizeGenEtaSquared) {
-      fields[[length(fields) + 1]] <- list(name="genEta", type="number", title="\u03B7\u00B2<sub>G</sub>", format="dp:3")
+      anovaTable$addColumnInfo(name="genEta", type="number", title="\u03B7\u00B2<sub>G</sub>")
     }
-    if(options$effectSizeOmegaSquared) {
-      fields[[length(fields) + 1]] <- list(name="omega", type="number", title="\u03C9\u00B2", format="dp:3")
+    
+    if (options$effectSizeOmegaSquared) {
+      anovaTable$addColumnInfo(title = "\u03C9\u00B2", name = "omega", type = "number")
     }
-  }
-  
-  anova[["schema"]] <- list(fields=fields)
-  
-  
-  
-  if (options$sumOfSquares == "type1") {
-    
-    .addFootnote(footnotes, text = "Type I Sum of Squares", symbol = "<em>Note.</em>")
-    
-  } else if (options$sumOfSquares == "type2") {
-    
-    .addFootnote(footnotes, text = "Type II Sum of Squares", symbol = "<em>Note.</em>")
-    
-  } else if (options$sumOfSquares == "type3") {
-    
-    .addFootnote(footnotes, text = "Type III Sum of Squares", symbol = "<em>Note.</em>")
     
   }
   
-  if (options$VovkSellkeMPR){
-    .addFootnote(footnotes, symbol = "\u002A", text = "Vovk-Sellke Maximum
-		<em>p</em>-Ratio: Based the <em>p</em>-value, the maximum
-		possible odds in favor of H\u2081 over H\u2080 equals
-		1/(-e <em>p</em> log(<em>p</em>)) for <em>p</em> \u2264 .37
-		(Sellke, Bayarri, & Berger, 2001).")
-  }
+  typeFootnote <- switch(options$sumOfSquares,
+                         type1 = "Type I Sum of Squares",
+                         type2 = "Type II Sum of Squares",
+                         type3 = "Type III Sum of Squares")
+  anovaTable$addFootnote(message = typeFootnote, symbol = "<em>Note.</em>")
+
+  if (!ready)
+    return()
   
-  modelDef <- .rmModelFormula(options)
-  terms.normal <- modelDef$terms.normal
-  terms.base64 <- modelDef$terms.base64
-  termsRM.base64 <- modelDef$termsRM.base64
+  withinResults <- rmAnovaContainer[["anovaResult"]]$object$withinAnovaTable
+  residualResult <- rmAnovaContainer[["anovaResult"]]$object$residualTable
   
-  #	(options$sphericityCorrections && !is.null(corrections) && !(length(corrections) == 1 && corrections == "None"))
-  #	(options$sphericityCorrections && perform == "init")
-  
-  if (is.null(model)) {
+  for (case in rownames(withinResults[[1]])) {
     
-    anova.rows <- list()
+    if (case %in% rownames(residualResult)[-1])
+      anovaTable$addRows(residualResult[which(case == rownames(residualResult)) - 1, ])
     
-    if (length(terms.base64) > 1) {
-      
-      for (i in 2:length(terms.base64)) {
-        
-        for (j in .indices(terms.base64[[i]])) {
-          
-          if (j == 1) {
-            newGroup <- TRUE
-          } else {
-            newGroup <- FALSE
-          }
-          
-          if (options$sphericityCorrections && !is.null(corrections)) {
-            
-            counter <- 1
-            
-            if (options$sphericityNone) {
-              row <- list("case"=terms.normal[[i]][j], "cor"="None", "SS"=".", "df"=".", "MS"=".", "F"=".", "p"=".", ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1))
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- "."
-              }
-              anova.rows[[length(anova.rows) + 1]] <- row
-              counter <- counter + 1
-            }
-            
-            if (options$sphericityGreenhouseGeisser) {
-              row <- list("case"=terms.normal[[i]][j], "cor"="Greenhouse-Geisser", "SS"=".", "df"=".", "MS"=".", "F"=".", "p"=".", ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1))
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- "."
-              }
-              anova.rows[[length(anova.rows) + 1]] <- row
-              counter <- counter + 1
-            }
-            
-            if (options$sphericityHuynhFeldt) {
-              row <- list("case"=terms.normal[[i]][j], "cor"="Huynh-Feldt", "SS"=".", "df"=".", "MS"=".", "F"=".", "p"=".", ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1))
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- "."
-              }
-              anova.rows[[length(anova.rows) + 1]] <- row
-              counter <- counter + 1
-            }
-            
-          } else {
-            
-            row <- list("case"=terms.normal[[i]][j], "SS"=".", "df"=".", "MS"=".", "F"=".", "p"=".", ".isNewGroup" = newGroup)
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- "."
-            }
-            anova.rows[[length(anova.rows) + 1]] <- row
-            
-          }
-        }
-        
-        if (options$sphericityCorrections && !is.null(corrections)) {
-          
-          counter <- 1
-          
-          if (options$sphericityNone) {
-            row <- list("case"="Residual", "cor"="None", "SS"=".", "df"=".", "MS"=".", "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            anova.rows[[length(anova.rows) + 1]] <- row
-            counter <- counter + 1
-          }
-          
-          if (options$sphericityGreenhouseGeisser) {
-            row <- list("case"="Residual", "cor"="Greenhouse-Geisser", "SS"=".", "df"=".", "MS"=".", "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            anova.rows[[length(anova.rows) + 1]] <- row
-            counter <- counter + 1
-          }
-          
-          if (options$sphericityHuynhFeldt) {
-            row <- list("case"="Residual", "cor"="Huynh-Feldt", "SS"=".", "df"=".", "MS"=".", "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            anova.rows[[length(anova.rows) + 1]] <- row
-            counter <- counter + 1
-          }
-          
-        } else {
-          
-          row <- list("case"="Residual", "SS"=".", "df"=".", "MS"=".", "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = TRUE)
-          if (options$VovkSellkeMPR){
-            row[["VovkSellkeMPR"]] <- ""
-          }
-          anova.rows[[length(anova.rows) + 1]] <- row
-          
-        }
-      }
-    }
-    
-    anova[["data"]] <- anova.rows
-    
-    if (status$error)
-      anova[["error"]] <- list(errorType="badData", errorMessage=status$errorMessage)
-    
-    #		if (options$sphericityCorrections && !is.null(corrections) && !(length(corrections) == 1 && corrections == "None"))
-    #			anova[["error"]] <- list(errorType="badData", errorMessage="Could not estimate sphericity corrections due to problems with estimating the correction parameters.")
-    
-  } else {
-    
-    anova.rows <- list()
-    
-    if (is.null(corrections))
-      corrections <- "empty"
-    
-    if (options$sumOfSquares == "type1") {
-      
-      result <- model
-      
-      for (i in 2:length(terms.base64)) {
-        
-        resultTable <- result[[paste("Error: subject", termsRM.base64[[i-1]], sep=":")]][[1]]
-        
-        modelTermsResults <- strsplit(gsub(" ", "", rownames(resultTable), fixed = TRUE), ":")
-        
-        for (j in .indices(terms.base64[[i]])) {
-          
-          if (j == 1) {
-            newGroup <- TRUE
-          } else {
-            newGroup <- FALSE
-          }
-          
-          modelTermsCase <- strsplit(terms.base64[[i]],":")[[j]]
-          index <- unlist(lapply(modelTermsResults, function(x) .identicalTerms(x,modelTermsCase)))
-          
-          if (sum(index) > 0) {
-            
-            SS <- resultTable[index,"Sum Sq"]
-            df <- resultTable[index,"Df"]
-            MS <- resultTable[index,"Mean Sq"]
-            F <- resultTable[index,"F value"]
-            p <- resultTable[index,"Pr(>F)"]
-            dfR <- resultTable["Residuals","Df"]
-            
-            if (is.null(F) && is.null(p)) {
-              F <- .clean(NaN)
-              p <- .clean(NaN)
-            }
-            
-            if (is.na(dfR)) {
-              dfR <- 0
-            }
-            
-          } else {
-            
-            SS <- 0
-            df <- 0
-            MS <- .clean(NaN)
-            F <- .clean(NaN)
-            p <- .clean(NaN)
-            dfR <- 0
-            
-          }
-          
-          counter <- 0
-          
-          for (cor in corrections) {
-            
-            counter <- counter + 1
-            
-            row.footnotes <- NULL
-            
-            if (!is.null(stateSphericity) && !is.na(stateSphericity[i-1,"p"]) && stateSphericity[i-1,"p"] < .05) {
-              
-              foot.index <- .addFootnote(footnotes, text="Mauchly's test of sphericity indicates that the assumption of sphericity is violated (p < .05).")
-              row.footnotes <- list(SS=list(foot.index), df=list(foot.index), MS=list(foot.index), F=list(foot.index), p=list(foot.index))
-              
-            }
-            
-            if (!options$sphericityCorrections || cor == "empty") {
-              
-              row <- list("case"=terms.normal[[i]][j], "SS"=SS, "df"=df, "MS"=MS, "F"=F, "p"=p, ".isNewGroup" = newGroup, .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "None") {
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="None", "SS"=SS, "df"=df, "MS"=MS, "F"=F, "p"=p, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "Greenhouse-Geisser") {
-              
-              dfGG <- df * stateSphericity[i-1,"GG"]
-              MSGG <- SS / dfGG
-              dfRGG <- dfR * stateSphericity[i-1,"GG"]
-              
-              if (F != "NaN") {
-                pGG <-  pf(F,dfGG,dfRGG,lower.tail=FALSE)
-              } else {
-                pGG <- .clean(NaN)
-              }
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="Greenhouse-Geisser", "SS"=SS, "df"=dfGG, "MS"=MSGG, "F"=F, "p"=pGG, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "Huynh-Feldt") {
-              
-              dfHF <- df * stateSphericity[i-1,"HF"]
-              MSHF <- SS / dfHF
-              dfRHF <- dfR * stateSphericity[i-1,"HF"]
-              
-              if (F != "NaN") {
-                pHF <- pf(F,dfHF,dfRHF,lower.tail=FALSE)
-              } else {
-                pHF <- .clean(NaN)
-              }
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="Huynh-Feldt", "SS"=SS, "df"=dfHF, "MS"=MSHF, "F"=F, "p"=pHF, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            }
-            
-            if (options$effectSizeEstimates) {
-              
-              if (sum(gsub(" ", "", row.names(resultTable), fixed = TRUE) == "Residuals") > 0) {
-                index <- unlist(lapply(modelTermsResults, function(x) .identicalTerms(x,modelTermsCase)))
-
-                SSt <- sum(resultTable[,"Sum Sq"])
-                SSr <- resultTable["Residuals","Sum Sq"]
-                MSr <- SSr/resultTable["Residuals","Df"]
-                
-                row[["eta"]] <- SS / sum(unlist(lapply(result, function(x) return(x[[1]]['Sum Sq']))))
-                row[["partialEta"]] <- SS / (SS + SSr)
-                row[["genEta"]] <- fullModel[["anova_table"]][index[-1], "ges"]
-
-                n <- resultTable["Residuals","Df"]  + 1
-                MSm <- resultTable[index, "Mean Sq"]
-                MSb <- result["Error: subject"][[1]][[1]]$`Mean Sq`
-                MSb <- MSb[length(MSb)]
-                omega <- (df / (n * (df + 1)) * (MSm - MSr)) / 
-                  (MSr + ((MSb - MSr) / (df + 1)) +
-                     (df / (n * (df + 1))) * (MSm - MSr))
-                
-                if (omega < 0) {
-                  row[["omega"]] <- 0
-                } else {
-                  row[["omega"]] <- omega
-                }
-                
-              } else {
-                
-                row[["eta"]] <- .clean(NaN)
-                row[["partialEta"]] <- .clean(NaN)
-                row[["genEta"]] <- .clean(NaN)
-                row[["omega"]] <- .clean(NaN)
-                
-              }
-            }
-            
-            anova.rows[[length(anova.rows) + 1]] <- row
-          }
-        }
-        
-        if (sum(gsub(" ", "", row.names(resultTable), fixed = TRUE) == "Residuals") > 0) {
-          
-          SS <- resultTable["Residuals","Sum Sq"]
-          df <- resultTable["Residuals","Df"]
-          MS <- resultTable["Residuals","Mean Sq"]
-          
-        } else {
-          
-          SS <- 0
-          df <- 0
-          MS <- .clean(NaN)
-        }
-        
-        counter <- 0
-        
-        for (cor in corrections) {
-          
-          counter <- counter + 1
-          
-          if (!options$sphericityCorrections || cor == "empty") {
-            
-            row <- list("case"="Residual", "SS"=SS, "df"=df, "MS"=MS, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = TRUE)
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "None") {
-            
-            row <- list("case"="Residual", "cor"="None", "SS"=SS, "df"=df, "MS"=MS, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "Greenhouse-Geisser") {
-            
-            dfGG <- df * stateSphericity[i-1,"GG"]
-            
-            if (SS > 0) {
-              MSGG <- SS / dfGG
-            } else {
-              MSGG <- .clean(NaN)
-            }
-            
-            row <- list("case"="Residual", "cor"="Greenhouse-Geisser", "SS"=SS, "df"=dfGG, "MS"=MSGG, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "Huynh-Feldt") {
-            
-            dfHF <- df * stateSphericity[i-1,"HF"]
-            
-            if (SS > 0) {
-              MSHF <- SS / dfHF
-            } else {
-              MSHF <- .clean(NaN)
-            }
-            
-            row <- list("case"="Residual", "cor"="Huynh-Feldt", "SS"=SS, "df"=dfHF, "MS"=MSHF, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          }
-          
-          anova.rows[[length(anova.rows) + 1]] <- row
-          
-        }
-      }
-      
-    } else {	# if sum of squares is equal to type 2 or 3
-      
-      result <- model
-      
-      modelTermsResults <- strsplit(rownames(result), ":")
-      
-      for (i in 2:length(terms.base64)) {
-        
-        for (j in .indices(terms.base64[[i]])) {
-          
-          if (j == 1) {
-            newGroup <- TRUE
-          } else {
-            newGroup <- FALSE
-          }
-          
-          modelTermsCase <- strsplit(terms.base64[[i]],":")[[j]]
-          index <- unlist(lapply(modelTermsResults, function(x) .identicalTerms(x,modelTermsCase)))
-          
-          SS <- result[index,"Sum Sq"]
-          df <- result[index,"num Df"]
-          MS <- SS / df
-          F <- .clean(result[index,"F value"])
-          p <- .clean(result[index,"Pr(>F)"])
-          dfR <- result[index,"den Df"]
-          
-          counter <- 0
-          
-          for (cor in corrections) {
-            
-            counter <- counter + 1
-            
-            row.footnotes <- NULL
-            
-            if (!is.null(stateSphericity) && !is.na(stateSphericity[i-1,"p"]) && stateSphericity[i-1,"p"] < .05) {
-              
-              foot.index <- .addFootnote(footnotes, text="Mauchly's test of sphericity indicates that the assumption of sphericity is violated (p < .05).")
-              row.footnotes <- list(SS=list(foot.index), df=list(foot.index), MS=list(foot.index), F=list(foot.index), p=list(foot.index))
-              
-            }
-            
-            if (!options$sphericityCorrections || cor == "empty") {
-              
-              row <- list("case"=terms.normal[[i]][j], "SS"=SS, "df"=df, "MS"=MS, "F"=F, "p"=p, ".isNewGroup" = newGroup, .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "None") {
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="None", "SS"=SS, "df"=df, "MS"=MS, "F"=F, "p"=p, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "Greenhouse-Geisser") {
-              
-              dfGG <- df * stateSphericity[i-1,"GG"]
-              MSGG <- SS / dfGG
-              dfRGG <- dfR * stateSphericity[i-1,"GG"]
-              
-              if (F != "NaN") {
-                pGG <-  pf(F,dfGG,dfRGG,lower.tail=FALSE)
-              } else {
-                pGG <- .clean(NaN)
-              }
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="Greenhouse-Geisser", "SS"=SS, "df"=dfGG, "MS"=MSGG, "F"=F, "p"=pGG, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            } else if (cor == "Huynh-Feldt") {
-              
-              dfHF <- df * stateSphericity[i-1,"HF"]
-              MSHF <- SS / dfHF
-              dfRHF <- dfR * stateSphericity[i-1,"HF"]
-              
-              if (F != "NaN") {
-                pHF <- pf(F,dfHF,dfRHF,lower.tail=FALSE)
-              } else {
-                pHF <- .clean(NaN)
-              }
-              
-              row <- list("case"=terms.normal[[i]][j], "cor"="Huynh-Feldt", "SS"=SS, "df"=dfHF, "MS"=MSHF, "F"=F, "p"=pHF, ".isNewGroup" = (newGroup && counter == 1), ".isNewSubGroup" = (!newGroup && counter == 1 && length(corrections) > 1), .footnotes=row.footnotes)
-              if (options$VovkSellkeMPR){
-                row[["VovkSellkeMPR"]] <- .VovkSellkeMPR(row[["p"]])
-              }
-              
-            }
-            
-            
-            if (options$effectSizeEstimates) {
-              
-              modelTermsCases <- strsplit(terms.base64[[i]],":")
-              
-              indices <- c()
-              for (case in .indices(terms.base64[[i]])) {
-                indices <- c(indices, which(unlist(lapply(modelTermsResults, function(x) .identicalTerms(x,modelTermsCases[[case]])))))
-              }
-
-              if (result[index,"Error SS"] > 0) {
-
-                SSr <- result[index,"Error SS"]
-                SSt <- sum(result[indices,"Sum Sq"]) + SSr
-                MSr <- SSr/result[index,"den Df"]
-
-                # row[["eta"]] <- SS / SSt
-                row[["eta"]] <- SS / (sum(result[-1, 'Sum Sq']) + sum(unique(result[, 'Error SS'])))
-                row[["partialEta"]] <- SS / (SS + SSr)
-                row[["genEta"]] <- fullModel[["anova_table"]][index[-1], "ges"]
-
-                n <- result[1, 'den Df'] + 1
-                MSm <- result[index, "Sum Sq"] / result[index, "num Df"] 
-                MSb <- result[1, 'Error SS'] / (n - 1)
-                omega <- (df / (n * (df + 1)) * (MSm - MSr)) / 
-                  (MSr + ((MSb - MSr) / (df + 1)) +
-                     (df / (n * (df + 1))) * (MSm - MSr))
-                
-                if (omega < 0) {
-                  row[["omega"]] <- 0
-                } else {
-                  row[["omega"]] <- omega
-                }
-                
-              } else {
-                
-                row[["eta"]] <- .clean(NaN)
-                row[["partialEta"]] <- .clean(NaN)
-                row[["genEta"]] <- .clean(NaN)
-                row[["omega"]] <- .clean(NaN)
-                
-              }
-            }
-            
-            anova.rows[[length(anova.rows) + 1]] <- row
-            
-          }
-        }
-        
-        modelTermsCase <- unlist(strsplit(termsRM.base64[[i-1]], ":"))
-        indexResidual <- unlist(lapply(modelTermsResults, function(x) .identicalTerms(x,modelTermsCase)))
-        
-        SS <- result[indexResidual,"Error SS"]
-        df <- result[indexResidual,"den Df"]
-        
-        if (SS == 0 && df == 0) {
-          MS <- .clean(NaN)
-        } else {
-          MS <- SS / df
-        }
-        
-        counter <- 0
-        
-        for (cor in corrections) {
-          
-          counter <- counter + 1
-          
-          if (!options$sphericityCorrections || cor == "empty") {
-            
-            row <- list("case"="Residual", "SS"=SS, "df"=df, "MS"=MS, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = TRUE)
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "None") {
-            
-            row <- list("case"="Residual", "cor"="None", "SS"=SS, "df"=df, "MS"=MS, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "Greenhouse-Geisser") {
-            
-            dfGG <- df * stateSphericity[i-1,"GG"]
-            
-            if (SS > 0) {
-              MSGG <- SS / dfGG
-            } else {
-              MSGG <- .clean(NaN)
-            }
-            
-            row <- list("case"="Residual", "cor"="Greenhouse-Geisser", "SS"=SS, "df"=dfGG, "MS"=MSGG, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          } else if (cor == "Huynh-Feldt") {
-            
-            dfHF <- df * stateSphericity[i-1,"HF"]
-            
-            if (SS > 0) {
-              MSHF <- SS / dfHF
-            } else {
-              MSHF <- .clean(NaN)
-            }
-            
-            row <- list("case"="Residual", "cor"="Huynh-Feldt", "SS"=SS, "df"=dfHF, "MS"=MSHF, "F"="", "p"="", "eta"="", "partialEta"="", "genEta"="", "omega" = "", ".isNewSubGroup" = (counter == 1))
-            if (options$VovkSellkeMPR){
-              row[["VovkSellkeMPR"]] <- ""
-            }
-            
-          }
-          
-          anova.rows[[length(anova.rows) + 1]] <- row
-          
-        }
-      }
-    }
-    
-    anova[["data"]] <- anova.rows
-    anova[["status"]] <- "complete"
+    for (cor in corrections)
+      anovaTable$addRows(withinResults[[cor]][case, ])
     
   }
+  anovaTable$addRows(residualResult[nrow(residualResult), ])
   
-  anova[["footnotes"]] <- as.list(footnotes)
   
-  list(result = anova, status = status)
+  return()
 }
+
 
 .sphericityTest <- function(options, stateSphericity, perform, status) {
   

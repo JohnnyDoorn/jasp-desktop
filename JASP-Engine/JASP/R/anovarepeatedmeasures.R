@@ -345,27 +345,43 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
     
     tryResult <- try({
       result <- stats::aov(model.formula, data=dataset)
-      summaryResultOne <- summary(result)
-      
+      summaryResultOne <- summary(result, expand.split = FALSE)
+      n <- summaryResultOne[[1]][[1]]["Residuals", "Df"] + 1
+      MSb <- summaryResultOne[[1]][[1]]["Residuals", "Mean Sq"]
+
       result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
       summaryResult <- summary(result)
-      
+
       # Reformat the results to make it consistent with types 2 and 3
-      model <- matrix(ncol = 7, nrow = nrow(summaryResult$univariate.tests)-1)
-      colnames(model) <- c("num Df", "Sum Sq", "Mean Sq", "F value", "Pr(>F)", "Error SS", "den Df")
-      model <- as.data.frame(model)
-      termNames <- character(nrow(model))
-      counter <- 1
-      for (i in 1:length(summaryResultOne)) {
-        for(j in 1:(nrow(summaryResultOne[[i]][[1]])-1)) {
-          model[counter, 1:5] <- summaryResultOne[[i]][[1]][j, 1:5]
-          model[counter, 6] <-  summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Sum Sq"]
-          model[counter, 7] <- summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Df"]
-          termNames[counter] <- row.names(summaryResultOne[[i]][[1]][j,])
-          counter <- counter + 1
+      # model <- matrix(ncol = 6, nrow = nrow(summaryResult$univariate.tests)-1)
+      # colnames(model) <- c("num Df", "Sum Sq", "Mean Sq", "F value", "Pr(>F)", "Error SS", "den Df")
+      # colnames(model) <- c("Sum Sq", "num Df", "Error SS", "den Df", "F value", "Pr(>F)")
+      # rownames(model) <- rownames(summaryResult$univariate.tests)[-1]
+      model <- as.data.frame(summaryResult$univariate.tests[-1, ])
+
+      for (mySub in unlist(summaryResultOne, recursive = FALSE)) {
+        for(term in trimws(rownames(mySub)[-nrow(mySub)])) {
+          model[term, "Sum Sq"] <- mySub[term, "Sum Sq"]
+          model[term, "num Df"] <- mySub[term, "Df"]
+          model[term, "F value"] <- mySub[term, "F value"]
+          model[term, "Pr(>F)"] <- mySub[term, "Pr(>F)"]
+          model[term, "Error SS"] <-  mySub["Residuals", "Sum Sq"]
+          model[term, "den Df"] <- mySub["Residuals", "Df"]
         }
       }
-      rownames(model) <- termNames
+      # model <- as.data.frame(model)
+      # termNames <- character(nrow(model))
+      # counter <- 1
+      # for (i in 1:length(summaryResultOne)) {
+      #   for(j in 1:(nrow(summaryResultOne[[i]][[1]])-1)) {
+      #     model[counter, 1:4] <- summaryResultOne[[i]][[1]][j, c(1,2,4,5)]
+      #     model[counter, 5] <-  summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Sum Sq"]
+      #     model[counter, 6] <- summaryResultOne[[i]][[1]][nrow(summaryResultOne[[i]][[1]]), "Df"]
+      #     termNames[counter] <- row.names(summaryResultOne[[i]][[1]][j,])
+      #     counter <- counter + 1
+      #   }
+      # }
+      # rownames(model) <- termNames
     })
     
   } else if (options$sumOfSquares == "type2") {
@@ -374,6 +390,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
       result <- afex::aov_car(model.formula, data=dataset, type= 2, factorize = FALSE)
       summaryResult <- summary(result)
       model <- as.data.frame(unclass(summaryResult$univariate.tests)[-1, ])
+      n <- summaryResult$univariate.tests[1, 'den Df'] + 1
+      MSb <- summaryResult$univariate.tests[1, 'Error SS'] / (n - 1)
     })
     
   } else {
@@ -382,6 +400,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
       result <- afex::aov_car(model.formula, data=dataset, type= 3, factorize = FALSE)
       summaryResult <- summary(result)
       model <- as.data.frame(unclass(summaryResult$univariate.tests)[-1, ])
+      n <- summaryResult$univariate.tests[1, 'den Df'] + 1
+      MSb <- summaryResult$univariate.tests[1, 'Error SS'] / (n - 1)
     })
     
   }
@@ -420,7 +440,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   rownames(residualResults) <- cases
   sortedModel[["Mean Sq"]] <- sortedModel[["Sum Sq"]] / sortedModel[["num Df"]]
   residualResults[["Mean Sq"]] <- residualResults[["Sum Sq"]] / residualResults[["num Df"]]
-  
+  residualResults[["case"]] <- "Residuals"
+
   # Now we calculate effect sizes
   SSr <- sortedModel[["Error SS"]]
   MSr <- SSr/sortedModel[["den Df"]]
@@ -429,66 +450,60 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   sortedModel[["etaPart"]] <- sortedModel[["Sum Sq"]] / (sortedModel[["Sum Sq"]] + SSr)
   sortedModel[["genEta"]] <- result[["anova_table"]]["ges"]
   
-  n <- nrow(dataset)
+  # n <- sortedModel[1, 'den Df'] + 1
   df <- sortedModel[["num Df"]]
   MSm <- sortedModel[["Mean Sq"]]
-  MSb <- residualResults[["Mean Sq"]][residualResults[["isWithinTerm"]] == 0]
-  
+  # MSb <- residualResults[["Mean Sq"]][residualResults[["isWithinTerm"]] == 0]
   # MSb <- result[1, 'Error SS'] / (n - 1) # or  result["Error: subject"][[1]][[1]]$`Mean Sq`
   sortedModel[["omega"]] <- (df / (n * (df + 1)) * (MSm - MSr)) / (MSr + ((MSb - MSr) / (df + 1)) + 
                                                                      (df / (n * (df + 1))) * (MSm - MSr))
-  
   # Now we include the results from the corrections
   corrections <- summaryResult$pval.adjustments
-  withinAnovaTable <- subset(sortedModel, isWithinTerm == TRUE)
+  withinAnovaTable <- ggTable <- hfTable <- subset(sortedModel, isWithinTerm == 1)
   withinIndices <- .mapAnovaTermsToTerms(rownames(sortedModel), rownames(corrections))
   
-  withinAnovaTable[["dfGG"]] <- withinAnovaTable[["num Df"]] * corrections[withinIndices, "GG eps"]
-  withinAnovaTable[["MSGG"]] <- withinAnovaTable[["Sum Sq"]] / withinAnovaTable[["dfGG"]]
-  withinAnovaTable[["dfRGG"]] <- withinAnovaTable[["den Df"]] * corrections[withinIndices, "GG eps"]
-  withinAnovaTable[["pGG"]] <-  pf(withinAnovaTable[["F value"]], withinAnovaTable[["dfGG"]], 
-                                   withinAnovaTable[["dfRGG"]], lower.tail = FALSE)
+  ggTable[["num Df"]] <- withinAnovaTable[["num Df"]] * corrections[withinIndices, "GG eps"]
+  ggTable[["Mean Sq"]] <-  withinAnovaTable[["Sum Sq"]] / ggTable[["num Df"]]
+  ggTable[["den Df"]] <- withinAnovaTable[["den Df"]] * corrections[withinIndices, "GG eps"]
+  ggTable[["Pr(>F)"]] <-  pf(withinAnovaTable[["F value"]], ggTable[["num Df"]], 
+                             ggTable[["den Df"]], lower.tail = FALSE)
+  ggTable[["correction"]] <-  "Greenhouse-Geisser"
+  ggTable[[".isNewGroup"]] <- FALSE 
   
-  wResidualResults <- subset(residualResults, isWithinTerm == TRUE)
+  hfTable[["Mean Sq"]] <- withinAnovaTable[["Sum Sq"]] / hfTable[["num Df"]]
+  hfTable[["num Df"]] <-  withinAnovaTable[["num Df"]] * corrections[, "HF eps"]
+  hfTable[["den Df"]] <- withinAnovaTable[["den Df"]] * corrections[, "HF eps"]
+  hfTable[["Pr(>F)"]] <-  pf(withinAnovaTable[["F value"]], hfTable[["num Df"]], 
+                             hfTable[["den Df"]], lower.tail = FALSE)
+  hfTable[["correction"]] <-  "Huyn-Feldt"
+  hfTable[[".isNewGroup"]] <- FALSE 
+ 
+  wResidualResults <- wResidualResultsGG <- wResidualResultsHF <- subset(residualResults, isWithinTerm == 1)
+  wResidualResults[["correction"]] <- "None"
+  
   residualIndices <- .mapAnovaTermsToTerms(rownames(wResidualResults), rownames(corrections))
-  wResidualResults[["dfGG"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "GG eps"]
-  wResidualResults[["MSGG"]] <- wResidualResults[["Sum Sq"]] / wResidualResults[["dfGG"]]
   
-  
-  withinAnovaTable[["dfHF"]] <- withinAnovaTable[["num Df"]] * corrections[, "HF eps"]
-  withinAnovaTable[["MSHF"]] <- withinAnovaTable[["Sum Sq"]] / withinAnovaTable[["dfHF"]]
-  withinAnovaTable[["dfRHF"]] <- withinAnovaTable[["den Df"]] * corrections[, "HF eps"]
-  withinAnovaTable[["pHF"]] <-  pf(withinAnovaTable[["F value"]], withinAnovaTable[["dfHF"]], 
-                                   withinAnovaTable[["dfRHF"]], lower.tail = FALSE)
-  
-  wResidualResults[["dfHF"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "HF eps"]
-  wResidualResults[["MSHF"]] <- wResidualResults[["Sum Sq"]] / wResidualResults[["dfHF"]]
-  wResidualResults[["case"]] <- "Residuals"
+  wResidualResultsGG[["num Df"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "GG eps"]
+  wResidualResultsGG[["Sum Sq"]] <- wResidualResults[["Sum Sq"]] / wResidualResultsGG[["num Df"]]
+  wResidualResultsGG[["correction"]] <-  "Greenhouse-Geisser"
   
   withinAnovaTable[["correction"]] <- "None"
   
-  ggTable <- withinAnovaTable
-  ggTable[["Mean Sq"]] <- withinAnovaTable[["MSGG"]]
-  ggTable[["den Df"]] <- withinAnovaTable[["dfGG"]]
-  ggTable[["num Df"]] <- withinAnovaTable[["dfRGG"]]
-  ggTable[["Pr(>F)"]] <- withinAnovaTable[["pGG"]]
-  ggTable[["correction"]] <-  "Greenhouse-Geisser"
-
-  hfTable <- withinAnovaTable
-  hfTable[["Mean Sq"]] <- withinAnovaTable[["MSGG"]]
-  hfTable[["den Df"]] <- withinAnovaTable[["dfGG"]]
-  hfTable[["num Df"]] <- withinAnovaTable[["dfRGG"]]
-  hfTable[["Pr(>F)"]] <- withinAnovaTable[["pGG"]]
-  hfTable[["correction"]] <-  "Huyn-Feldt"
+  wResidualResultsHF[["dfHF"]] <- wResidualResults[["num Df"]] * corrections[residualIndices, "HF eps"]
+  wResidualResultsHF[["MSHF"]] <- wResidualResults[["Sum Sq"]] / wResidualResultsHF[["num Df"]]
+  wResidualResultsHF[["correction"]] <-  "Huyn-Feldt"
+  
 
   withinAnovaTableCollection <- list("None" = withinAnovaTable,"Huyn-Feldt" = hfTable, "Greenhouse-Geisser" = ggTable)
-
+  wResidualResultsList <- list("None" = wResidualResults, "Huyn-Feldt" = wResidualResultsHF, 
+                               "Greenhouse-Geisser" = wResidualResultsGG)
+  
   return(list(anovaResult = sortedModel, 
-              residualTable = wResidualResults, 
+              residualTable = wResidualResultsList, 
               withinAnovaTable = withinAnovaTableCollection,
               mauchly = summaryResult$sphericity.tests, 
               fullModel = result, 
-              tryResult = tryResult))
+              tryResult = "tryResult"))
 }
 
 .mapAnovaTermsToTerms <- function(oneTerms, twoTerms) {
@@ -1187,7 +1202,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   }
   
   anovaTable$addColumnInfo(title = "Sum of Squares", name = "Sum Sq", type = "number")
-  anovaTable$addColumnInfo(title = "df", name = "den Df", type = dfType)
+  anovaTable$addColumnInfo(title = "df", name = "num Df", type = dfType)
   anovaTable$addColumnInfo(title = "Mean Square", name = "Mean Sq", type = "number")
   anovaTable$addColumnInfo(title = "F", name = "F value", type = "number")
   anovaTable$addColumnInfo(title = "p", name = "Pr(>F)", type = "number")
@@ -1227,19 +1242,24 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
     return()
   
   withinResults <- rmAnovaContainer[["anovaResult"]]$object$withinAnovaTable
-  residualResult <- rmAnovaContainer[["anovaResult"]]$object$residualTable
+  residualResults <- rmAnovaContainer[["anovaResult"]]$object$residualTable
+  modelTerms <- .rmModelFormula(options)$termsRM.base64
+  allCases <- rownames(withinResults[[1]])
+  addResidualAfter <- allCases[.mapAnovaTermsToTerms(modelTerms, allCases) + 1]
   
-  for (case in rownames(withinResults[[1]])) {
-    
-    if (case %in% rownames(residualResult)[-1])
-      anovaTable$addRows(residualResult[which(case == rownames(residualResult)) - 1, ])
+  for (case in allCases) {
     
     for (cor in corrections)
       anovaTable$addRows(withinResults[[cor]][case, ])
     
+    if (case %in% modelTerms) {
+      currentCase <- case
+    } else if (case %in% addResidualAfter) {
+      for (cor in corrections)
+        anovaTable$addRows(residualResults[[cor]][currentCase, ])
+    }
   }
-  anovaTable$addRows(residualResult[nrow(residualResult), ])
-  
+
   
   return()
 }

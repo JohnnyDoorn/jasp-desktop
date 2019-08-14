@@ -57,12 +57,18 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   .BANOVAdescriptives(rmAnovaContainer, longData, options, list(noVariables=FALSE), "RM-ANOVA")
   
   ## Create Post Hoc Tables
-  .resultsPostHoc(rmAnovaContainer, dataset, options, ready)
+  .rmAnovaPostHocTable(rmAnovaContainer, dataset, options, ready)
 
-  .rmAnovaContrastTable(rmAnovaContainer, dataset, longData, options, ready)
-  return()
+  ## Create Contrast Tables
+  .rmAnovaContrastTable(rmAnovaContainer, dataset, options, ready)
+
+  ## Create Marginal Means Tables
+  .rmAnovaMarginalMeansTable(rmAnovaContainer, dataset, options, ready)
   
-  .resultsContrasts(rmAnovaContainer, dataset, options, ready)
+  # Create Friedman Table
+  .rmAnovaFriedmanTable(rmAnovaContainer, longData, options, ready)
+  
+  .rmAnovaConoverTable(rmAnovaContainer, longData, options, ready)
   
   return()
   
@@ -73,16 +79,10 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
                                   results[["betweenSubjectsEffects"]], status, singular, stateSimpleEffects)
   
   
-  # Create Friedman Table
-  result <- .rmAnovaFriedman(dataset, fullModel, options, perform, status, singular, stateFriedman)
   
   # Create Conover Table
   result <- .rmAnovaConoverTable(dataset, options, perform, anovaModel$fullModel, status, stateConover, singular)
   
-  
-
-  ## Create Marginal Means Tables
-  result <- .rmAnovaMarginalMeansTable(dataset, options, perform, status, fullModel)
   
   ## Create Marginal Means via Bootstrapping Tables
   result <- .rmAnovaMarginalMeansBootstrappingTable(dataset, options, perform, status, fullModel)
@@ -272,14 +272,14 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   list(model.def = model.def, terms.normal = terms.normal, terms.base64 = terms.base64, termsRM.normal = termsRM.normal, termsRM.base64 = termsRM.base64)
 }
 
-.rmAnovaComputeResultsContainer <- function(rmAnovaContainer, dataset, options, ready) {
+.rmAnovaComputeResultsContainer <- function(rmAnovaContainer, longData, options, ready) {
   if (!ready) return()
   
   # Take results from state if possible
   if (!is.null(rmAnovaContainer[["anovaResult"]]))
     return()
   
-  rmAnovaResult <- .rmAnovaComputeResults(dataset, options)
+  rmAnovaResult <- .rmAnovaComputeResults(longData, options)
   
   if (rmAnovaResult[["tryResult"]] == "try-error") {
     rmAnovaContainer$setError("Some parameters are not estimable, most likely due to empty cells of the design.")
@@ -290,7 +290,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   rmAnovaContainer[["anovaResult"]] <- createJaspState(object = rmAnovaResult)
 }
 
-.rmAnovaComputeResults <- function(dataset, options, status) {
+.rmAnovaComputeResults <- function(dataset, options, bootstrappingCall = FALSE) {
   
   modelDef <- .rmModelFormula(options)
   model.formula <- as.formula(modelDef$model.def)
@@ -310,7 +310,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
     lmer_function = "lmerTest", method_mixed = "KR", return_aov = "afex_aov", 
     set_data_arg = FALSE, sig_symbols = c(" +", " *", " **", " ***"), type = 3
   )
-  
+
   # Computations:
   if (options$sumOfSquares == "type1") {
     
@@ -354,6 +354,9 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
     
   }
 
+  if (bootstrappingCall)
+    return(result)
+  
   if (class(tryResult) == "try-error") {
     return(list(tryResult == "try-error"))
   }
@@ -819,7 +822,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   return()
 }
 
-.referenceGrid <- function (rmAnovaContainer, options, ready) {
+.referenceGrid <- function(rmAnovaContainer, options, ready) {
   if (!is.null(rmAnovaContainer[["referenceGrid"]]) || !ready)
     return()
   
@@ -861,7 +864,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   return()
 }
 
-.resultsPostHoc <- function (rmAnovaContainer, dataset, options, ready) {
+.rmAnovaPostHocTable <- function(rmAnovaContainer, dataset, options, ready) {
   if(!is.null(rmAnovaContainer[["postHocStandardContainer"]]) || length(options$postHocTestsVariables) ==0)
     return()
   
@@ -1170,7 +1173,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   contr
 }
 
-.rmAnovaContrastTable <- function(rmAnovaContainer, dataset, longDataset, options, ready) {
+.rmAnovaContrastTable <- function(rmAnovaContainer, dataset, options, ready) {
   if (!is.null(rmAnovaContainer[["contrastContainer"]]) || all(grepl("none", options$contrasts)))
     return()
   
@@ -1268,334 +1271,177 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
  
 }
 
-.rmAnovaMarginalMeansTable <- function(dataset, options, perform, status, fullModel = NULL) {
+.rmAnovaMarginalMeansTable <- function(rmAnovaContainer, dataset, options, ready) {
+  if (!is.null(rmAnovaContainer[["marginalMeansContainer"]]) || length(options$marginalMeansTerms) == 0)
+    return ()
   
-  if (is.null(options$marginalMeansTerms))
-    return (list(result=NULL, status=status))
-  
-  
-  terms <- options$marginalMeansTerms
-  # the following adds automatically interactions of repeated measures terms with between subject terms
-  # (a workaround the qml/ui stuff)
-  repeatedMeasuresFactors <- sapply(options$repeatedMeasuresFactors, function(fac) fac$name)
-  repeatedMeasuresTerms <- sapply(terms, function(term) any(term$components %in% repeatedMeasuresFactors))
-  if(any(!repeatedMeasuresTerms)){
-    termsInteract <- list()
-    for(rmterm in which(repeatedMeasuresTerms)){
-      for(bsterm in which(!repeatedMeasuresTerms)){
-        termsInteract <- c(termsInteract, list(list(components = c(terms[[bsterm]]$components, terms[[rmterm]]$components))))
-      }
-    }
-    terms <- c(terms, termsInteract)
-  }
-  terms.base64 <- c()
-  terms.normal <- c()
-  
-  for (term in terms) {
-    
-    components <- unlist(term)
-    term.base64 <- paste(.v(components), collapse=":", sep="")
-    term.normal <- paste(components, collapse=" \u273B ", sep="")
-    
-    terms.base64 <- c(terms.base64, term.base64)
-    terms.normal <- c(terms.normal, term.normal)
-  }
-  
-  marginalMeans <- list()
-  
-  for (i in .indices(terms.base64)) {
-    
-    result <- list()
-    
-    result[["title"]] <- paste("Marginal Means - ",terms.normal[i], sep="")
-    result[["name"]] <- paste("marginalMeans_",gsub("\u273B","*",gsub(" ", "", terms.normal[i], fixed=TRUE), fixed=TRUE), sep="")
-    
-    fields <- list()
-    
-    for(j in .indices(unlist(terms[[i]])))
-      fields[[j]] <- list(name=unlist(terms[[i]])[[j]], type="string", combine=TRUE)
-    
-    fields[[length(fields) + 1]] <- list(name="Marginal Mean", type="number", format="sf:4;dp:3")
-    fields[[length(fields) + 1]] <- list(name="SE", type="number", format="sf:4;dp:3")
-    fields[[length(fields) + 1]] <- list(name="Lower", type="number", format="sf:4;dp:3", overTitle="95% CI")
-    fields[[length(fields) + 1]] <- list(name="Upper", type="number", format="sf:4;dp:3", overTitle="95% CI")
-    
-    footnotes <- .newFootnotes()
-    
-    if(options$marginalMeansCompareMainEffects) {
-      fields[[length(fields) + 1]] <- list(name="t", type="number", format="sf:4;dp:3")
-      fields[[length(fields) + 1]] <- list(name="p", type="number", format="dp:3;p:.001")
-      
-      if(options$marginalMeansCIAdjustment == "bonferroni") {
-        .addFootnote(footnotes, text = "Bonferroni CI adjustment", symbol = "<em>Note.</em>")
-      } else if(options$marginalMeansCIAdjustment == "sidak") {
-        .addFootnote(footnotes, text = "Sidak CI adjustment", symbol = "<em>Note.</em>")
-      }
-    }
-    
-    result[["schema"]] <- list(fields=fields)
-    
-    termsTemp <- as.vector(terms[[i]])
-    
-    lvls <- list()
-    
-    for (variable in unlist(termsTemp)) {
-      
-      whichRMFactor <- unlist(lapply(options[['repeatedMeasuresFactors']], 
-                                     FUN = function(x){x$name == variable}))
-      if (any(whichRMFactor)) {
-        lvls[[.v(variable)]] <- .v(options$repeatedMeasuresFactors[[which(whichRMFactor == TRUE)]]$levels)
-      } else {
-        whichBSFactor <- variable %in% options[['betweenSubjectFactors']]
-        lvls[[.v(variable)]] <- .v(levels(dataset[[.v(options$betweenSubjectFactors[[which(whichBSFactor == TRUE)]])]]))
-      }
-      
-    }
-    
-    cases <- rev(expand.grid(rev(lvls)))
-    cases <- as.data.frame(apply(cases,2,as.character))
-    
-    nRows <- dim(cases)[1]
-    nCol <- dim(cases)[2]
-    
-    if (perform == "run" && status$ready && status$error == FALSE)  {
-      
-      formula <- as.formula(paste("~", terms.base64[i]))
-      
-      if(options$marginalMeansCIAdjustment == "bonferroni") {
-        adjMethod <- "bonferroni"
-      } else if(options$marginalMeansCIAdjustment == "sidak") {
-        adjMethod <- "sidak"
-      } else {
-        adjMethod <- "none"
-      }
-      
-      r <- summary(emmeans::lsmeans(fullModel, formula), adjust = adjMethod, infer = c(TRUE,TRUE))
-      
-      rows <- list()
-      
-      for(k in 1:nRows) {
-        
-        row <- list()
-        
-        for(j in 1:nCol) {
-          row[[ .unv(colnames(cases)[j]) ]] <- .unv(cases[k,j])
-        }
-        
-        if(nCol > 1) {
-          index <- apply(r[,1:nCol], 1, function(x) all(x==cases[k,]))
-        } else {
-          index <- k
-        }
-        
-        row[["Marginal Mean"]] <- .clean(r$lsmean[index])
-        row[["SE"]] <- .clean(r$SE[index])
-        row[["Lower"]] <- .clean(r$lower.CL[index])
-        row[["Upper"]] <- .clean(r$upper.CL[index])
-        
-        if(options$marginalMeansCompareMainEffects) {
-          row[["t"]] <- .clean(r$t.ratio[index])
-          row[["p"]] <- .clean(r$p.value[index])
-        }
-        
-        if(cases[k,nCol] == lvls[[ nCol ]][1]) {
-          row[[".isNewGroup"]] <- TRUE
-        } else {
-          row[[".isNewGroup"]] <- FALSE
-        }
-        
-        rows[[k]] <- row
-        
-      }
-      
-      result[["data"]] <- rows
-      result[["status"]] <- "complete"
-      
-    } else {
-      
-      rows <- list()
-      
-      for(k in 1:nRows) {
-        
-        row <- list()
-        
-        for(j in 1:nCol)
-          row[[ .unv(colnames(cases)[j]) ]] <- .unv(cases[k,j])
-        
-        row[["Marginal Mean"]] <- "."
-        row[["SE"]] <- "."
-        row[["Lower"]] <- "."
-        row[["Upper"]] <- "."
-        
-        if(options$marginalMeansCompareMainEffects) {
-          row[["t"]] <- "."
-          row[["p"]] <- "."
-        }
-        
-        if(cases[k,nCol] == lvls[[ nCol ]][1]) {
-          row[[".isNewGroup"]] <- TRUE
-        } else {
-          row[[".isNewGroup"]] <- FALSE
-        }
-        
-        rows[[k]] <- row
-        
-      }
-      
-      result[["data"]] <- rows
-    }
-    
-    result[["footnotes"]] <- as.list(footnotes)
-    
-    if (status$error)
-      result[["error"]] <- list(error="badData")
-    
-    marginalMeans[[i]] <- result
-    
-  }
-  
-  
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    stateMarginalMeans <- marginalMeans
-    
-  } else {
-    
-    stateMarginalMeans <- NULL
-    
-  }
-  list(result=marginalMeans, status=status, stateMarginalMeans=stateMarginalMeans)
-}
 
-.rmAnovaMarginalMeansBootstrappingTable <- function(dataset, options, perform, status, fullModel = NULL) {
-  
-  if (is.null(options$marginalMeansTerms))
-    return (list(result=NULL, status=status))
-  
-  terms <- options$marginalMeansTerms
   # the following adds automatically interactions of repeated measures terms with between subject terms
   # (a workaround the qml/ui stuff)
-  repeatedMeasuresFactors <- sapply(options$repeatedMeasuresFactors, function(fac) fac$name)
-  repeatedMeasuresTerms <- sapply(terms, function(term) any(term$components %in% repeatedMeasuresFactors))
-  if(any(!repeatedMeasuresTerms)){
-    termsInteract <- list()
-    for(rmterm in which(repeatedMeasuresTerms)){
-      for(bsterm in which(!repeatedMeasuresTerms)){
-        termsInteract <- c(termsInteract, list(list(components = c(terms[[bsterm]]$components, terms[[rmterm]]$components))))
-      }
+  # repeatedMeasuresFactors <- sapply(options$repeatedMeasuresFactors, function(fac) fac$name)
+  # repeatedMeasuresTerms <- sapply(terms, function(term) any(term$components %in% repeatedMeasuresFactors))
+  # if(any(!repeatedMeasuresTerms)){
+  #   termsInteract <- list()
+  #   for(rmterm in which(repeatedMeasuresTerms)){
+  #     for(bsterm in which(!repeatedMeasuresTerms)){
+  #       termsInteract <- c(termsInteract, list(list(components = c(terms[[bsterm]]$components, terms[[rmterm]]$components))))
+  #     }
+  #   }
+  #   terms <- c(terms, termsInteract)
+  # }
+  # terms.base64 <- c()
+  # terms.normal <- c()
+  # 
+  # for (term in terms) {
+  #   
+  #   components <- unlist(term)
+  #   term.base64 <- paste(.v(components), collapse=":", sep="")
+  #   term.normal <- paste(components, collapse=" \u273B ", sep="")
+  #   
+  #   terms.base64 <- c(terms.base64, term.base64)
+  #   terms.normal <- c(terms.normal, term.normal)
+  # }
+  
+  marginalMeansContainer <- createJaspContainer(title = "Marginal Means")
+  marginalMeansContainer$dependOn(c("marginalMeansTerms",  "marginalMeansCompareMainEffects", "marginalMeansCIAdjustment",
+                                    "marginalMeansBootstrapping", "marginalMeansBootstrappingReplicates"))
+  
+  rmAnovaContainer[["marginalMeansContainer"]] <- marginalMeansContainer
+  
+  createMarginalMeansTable <- function(myTitle, options, individualTerms, makeBootstrapTable = FALSE, dfType = "integer" ) {
+    
+    preTitle <- if (!makeBootstrapTable) "Marginal Means - " else "Bootstrapped Marginal Means - "
+    marginalMeansTable <- createJaspTable(title = paste0(preTitle, myTitle))
+    
+    for (i in 1:length(individualTerms))
+      marginalMeansTable$addColumnInfo(name=individualTerms[i], type="string", combine = TRUE)
+    
+    marginalMeansTable$addColumnInfo(name="lsmean", title="Marginal Mean", type="number")
+    
+    if (makeBootstrapTable) {
+      thisOverTitle <- paste0("95% bca\u002A CI")
+    } else {
+      thisOverTitle <- paste0("95% CI for Mean Difference")
     }
-    terms <- c(terms, termsInteract)
-  }
-  terms.base64 <- c()
-  terms.normal <- c()
-  
-  for (term in terms) {
     
-    components <- unlist(term)
-    term.base64 <- paste(.v(components), collapse=":", sep="")
-    term.normal <- paste(components, collapse=" \u273B ", sep="")
+    marginalMeansTable$addColumnInfo(name="lower.CL", type = "number", title = "Lower",
+                                     overtitle = thisOverTitle, )
+    marginalMeansTable$addColumnInfo(name="upper.CL", type = "number", title = "Upper",
+                                     overtitle = thisOverTitle)
     
-    terms.base64 <- c(terms.base64, term.base64)
-    terms.normal <- c(terms.normal, term.normal)
-  }
-  
-  marginalMeans <- list()
-  
-  if(length(terms.base64) > 0 && perform == "run" && status$ready && status$error == FALSE){
-    ticks <- options[['marginalMeansBootstrappingReplicates']] * length(terms.base64)
-    progress <- .newProgressbar(ticks = ticks, callback = callback, response = TRUE)
-  }
-  
-  for (i in .indices(terms.base64)) {
+    marginalMeansTable$addColumnInfo(name="SE", type="number")
     
-    result <- list()
-    
-    result[["title"]] <- paste("Bootstrapped Marginal Means - ",terms.normal[i], sep="")
-    result[["name"]] <- paste("marginalMeans_",gsub("\u273B","*",gsub(" ", "", terms.normal[i], fixed=TRUE), fixed=TRUE), sep="")
-    
-    fields <- list()
-    
-    for(j in .indices(unlist(terms[[i]])))
-      fields[[j]] <- list(name=unlist(terms[[i]])[[j]], type="string", combine=TRUE)
-    
-    fields[[length(fields) + 1]] <- list(name="Marginal Mean", type="number", format="sf:4;dp:3")
-    fields[[length(fields) + 1]] <- list(name="Bias", type="number", format="sf:4;dp:3")
-    fields[[length(fields) + 1]] <- list(name="SE", type="number", format="sf:4;dp:3")
-    fields[[length(fields) + 1]] <- list(name="Lower", type="number", format="sf:4;dp:3", overTitle="95% bca\u002A CI")
-    fields[[length(fields) + 1]] <- list(name="Upper", type="number", format="sf:4;dp:3", overTitle="95% bca\u002A CI")
-    
-    footnotes <- .newFootnotes()
-    
-    .addFootnote(footnotes, symbol = "<em>Note.</em>",
-                 text = paste0("Bootstrapping based on ", options[['marginalMeansBootstrappingReplicates']], " replicates."))
-    .addFootnote(footnotes, symbol = "<em>Note.</em>",
-                 text = "Marginal Means estimate is based on the median of the bootstrap distribution.")
-    .addFootnote(footnotes, symbol = "\u002A",
-                 text = "Bias corrected accelerated.")
-    
-    result[["schema"]] <- list(fields=fields)
-    
-    termsTemp <- as.vector(terms[[i]])
-    
-    lvls <- list()
-    
-    for (variable in unlist(termsTemp)) {
+    if (makeBootstrapTable) {
       
-      whichRMFactor <- unlist(lapply(options[['repeatedMeasuresFactors']], 
-                                     FUN = function(x){x$name == variable}))
-      if (any(whichRMFactor)) {
-        lvls[[.v(variable)]] <- .v(options$repeatedMeasuresFactors[[which(whichRMFactor == TRUE)]]$levels)
-      } else {
-        whichBSFactor <- variable %in% options[['betweenSubjectFactors']]
-        lvls[[.v(variable)]] <- .v(levels(dataset[[.v(options$betweenSubjectFactors[[which(whichBSFactor == TRUE)]])]]))
-      }
+      marginalMeansTable$addColumnInfo(name="bias", type="number")
+      
+      marginalMeansTable$addFootnote(message = paste0("Bootstrapping based on ", 
+                                                      options[['marginalMeansBootstrappingReplicates']], " replicates."))
+      marginalMeansTable$addFootnote(message = paste0("Marginal Means estimate is based on the median of", 
+                                                        " the bootstrap distribution."))
+      marginalMeansTable$addFootnote(symbol = "\u002A", message = "Bias corrected accelerated.") 
       
     }
     
-    cases <- rev(expand.grid(rev(lvls)))
-    cases <- as.data.frame(apply(cases,2,as.character))
-    
-    nRows <- dim(cases)[1]
-    nCol <- dim(cases)[2]
-    
-    if (perform == "run" && status$ready && status$error == FALSE)  {
+    if (options$marginalMeansCompareMainEffects) {
+      marginalMeansTable$addColumnInfo(name="t.ratio", title="t", type="number")
+      marginalMeansTable$addColumnInfo(name="df", type = dfType)
+      marginalMeansTable$addColumnInfo(name="p.value", title="p", type="number")
       
-      formula <- as.formula(paste("~", terms.base64[i]))
+      if (options$marginalMeansCIAdjustment == "bonferroni") {
+        marginalMeansTable$addFootnote(message = "Bonferroni CI adjustment")
+      } else if (options$marginalMeansCIAdjustment == "sidak") {
+        marginalMeansTable$addFootnote(message = "Sidak CI adjustment")
+      }
+    }
+    
+    marginalMeansTable$showSpecifiedColumnsOnly <- TRUE
+    
+    return(marginalMeansTable)
+  }
+
+  
+  marginalTerms <- unlist(options$marginalMeansTerms, recursive = FALSE)
+
+
+  for (term in marginalTerms) {
+    thisVarName <- paste(term, collapse = " \u273B ")
+    individualTerms <- term
+    if (any(term %in% unlist(options$withinModelTerms))) dfType <- "number" else dfType <- "integer"
+    marginalMeansContainer[[paste0(.v(term), collapse = ":")]] <- createMarginalMeansTable(thisVarName, options, 
+                                                                                           individualTerms, 
+                                                                                           options$marginalMeansBootstrapping,
+                                                                                           dfType = dfType)
+  }
+  
+  if (!ready)
+    return()
+  
+  fullModel <- rmAnovaContainer[["anovaResult"]]$object$fullModel
+  
+  for (term in marginalTerms) {
+
+    termBase64 <- paste0(.v(term), collapse = ":")
+    
+    formula <- as.formula(paste("~", termBase64))
       
-      .bootstrapMarginalMeans <- function(data, indices, options){
-        pr <- progress()
-        response <- .optionsDiffCheckBootstrapRMAnovaMarginalMeans(pr, options)
-        
-        if(response$status == "changed" || response$status == "aborted")
-          stop("Bootstrapping options have changed")
-        
+    if(options$marginalMeansCIAdjustment == "bonferroni") {
+      adjMethod <- "bonferroni"
+    } else if(options$marginalMeansCIAdjustment == "sidak") {
+      adjMethod <- "sidak"
+    } else {
+      adjMethod <- "none"
+    }
+    
+    marginalResult <- summary(emmeans::lsmeans(fullModel, formula), adjust = adjMethod, infer = c(TRUE,TRUE))
+    
+    if (length(term) > 1)
+      marginalResult[[".isNewGroup"]] <- !duplicated(marginalResult[, length(term)])
+    
+    names(marginalResult)[1:length(term)] <- term
+    
+    for (var in term) 
+      marginalResult[[var]] <- .unv(marginalResult[[var]])
+    
+    
+    ### Bootstrapping 
+    if (options$marginalMeansBootstrapping) {
+      
+      startProgressbar(options[["marginalMeansBootstrappingReplicates"]])
+      
+      nRows <- nrow(marginalResult)
+      
+      .bootstrapMarginalMeansRmAnova <- function(data, indices, options, nRows){
+     
+        indices <- sample(indices, replace = TRUE)
         resamples <- data[indices, , drop=FALSE]
         
-        anovaModelBoots <- .rmAnovaComputeResults(resamples, options, TRUE) # refit model
+        dataset <- .shortToLong(resamples, options$repeatedMeasuresFactors, options$repeatedMeasuresCells, 
+                                c(options$betweenSubjectFactors, options$covariates))        
+        idx <- match(c("dependent", "subject"), colnames(dataset))
+        colnames(dataset)[idx] <- .v(colnames(dataset)[idx])
+
+        anovaModelBoots <- .rmAnovaComputeResults(dataset, options, bootstrappingCall = TRUE) # refit model
+        resultBoots <- summary(emmeans::lsmeans(anovaModelBoots, formula), infer = c(FALSE,FALSE))
         
-        modelBoots <- anovaModelBoots$fullModel
-        singularBoots <- anovaModelBoots$singular
-        r <- suppressMessages( # to remove clutter
-          summary(emmeans::lsmeans(modelBoots, formula), infer = c(FALSE,FALSE))
-        )
+        progressbarTick()
         
-        if(length(r$lsmean) == nRows){ # ensure that the bootstrap has all levels
-          return(r$lsmean)
+        if(length(resultBoots$lsmean) == nRows){ # ensure that the bootstrap has all levels
+          return(resultBoots$lsmean)
         } else {
-          return(rep(NA, nRows))
+          return(rep(NA, length(term)))
         }
       }
       
-      bootstrapMarginalMeans <- try(boot::boot(data = dataset, statistic = .bootstrapMarginalMeans, 
+      bootstrapMarginalMeans <- try(boot::boot(data = dataset, statistic = .bootstrapMarginalMeansRmAnova, 
                                                R = options[["marginalMeansBootstrappingReplicates"]],
+                                               nRows = nRows,
                                                options = options), silent = TRUE)
-      if(inherits(bootstrapMarginalMeans, "try-error") && 
-         identical(attr(bootstrapMarginalMeans, "condition")$message, "Bootstrapping options have changed"))
-        return("Bootstrapping options have changed")
+
+      bootstrapSummary <- summary(bootstrapMarginalMeans)
       
-      bootstrapMarginalMeans.summary <- summary(bootstrapMarginalMeans)
       ci.fails <- FALSE
-      bootstrapMarginalMeans.ci <- t(sapply(1:nrow(bootstrapMarginalMeans.summary), function(index){
+      bootstrapMarginalMeansCI <- t(sapply(1:nrow(bootstrapSummary), function(index){
         res <- try(boot::boot.ci(boot.out = bootstrapMarginalMeans, conf = 0.95, type = "bca",
                                  index = index)[['bca']][1,4:5])
         if(!inherits(res, "try-error")){
@@ -1608,125 +1454,257 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
         }
       }))
       
-      if(ci.fails){
-        .addFootnote(footnotes,
-                     symbol = "<i>Note.</i>", 
-                     text = "Some confidence intervals could not be computed. Possibly too few bootstrap replicates.")
-      }
+      if(ci.fails)
+        bootstrapTable$addFootnote(message = "Some confidence intervals could not be computed. Possibly too few bootstrap replicates.")
       
-      bootstrapMarginalMeans.summary[,"lower.CL"] <- bootstrapMarginalMeans.ci[,1]
-      bootstrapMarginalMeans.summary[,"upper.CL"] <- bootstrapMarginalMeans.ci[,2]
+      marginalResult[["lower.CL"]] <- bootstrapMarginalMeansCI[,1]
+      marginalResult[["upper.CL"]] <- bootstrapMarginalMeansCI[,2]
+
+      marginalResult[["lsmean"]] <- bootstrapSummary[["bootMed"]]
+      marginalResult[["bias"]] <- bootstrapSummary[["bootBias"]]
+      marginalResult[["SE"]] <- bootstrapSummary[["bootSE"]]
       
-      # the next chunk of code ensures that the rows in bootstrap
-      # table are in the same order as the rows in object cases
-      getModelCases <- summary(emmeans::lsmeans(fullModel, formula), infer = c(FALSE,FALSE))
-      getModelCases <- getModelCases[,names(cases), drop = FALSE]
-      names(getModelCases) <- .unv(names(getModelCases))
-      r <- as.data.frame(bootstrapMarginalMeans.summary)
-      r <- cbind(getModelCases, r)
+    }
+    
+    marginalMeansContainer[[termBase64]]$setData(marginalResult)    
+    
+  }
+  
+  return()
+}
+
+.rmAnovaFriedmanTable <- function(rmAnovaContainer, longData, options, ready) {
+  if (!is.null(rmAnovaContainer[["friedmanContainer"]]) || length(options$friedmanWithinFactor) == 0 || !ready)
+    return ()
+  
+  rmAnovaContainer[["friedmanContainer"]] <- createJaspContainer("Nonparametrics")
+  rmAnovaContainer$dependOn(c("friedmanWithinFactor",
+                              "friedmanBetweenFactor"))
+
+  friedmanTable <- createJaspTable(title = "Friedman Test")
+  friedmanTable$addColumnInfo(name="Factor", type="string")
+  friedmanTable$addColumnInfo(name="chiSqr", title="Chi-Squared", type="number")
+  friedmanTable$addColumnInfo(name="df", type="integer")
+  friedmanTable$addColumnInfo(name="p", type="number")
+  friedmanTable$addColumnInfo(name="kendall", title="Kendall's W", type="number")
+
+  rmAnovaContainer[["friedmanContainer"]][["friedmanTable"]] <- friedmanTable
+
+  if (!ready)
+    return()
+  
+  withinTerms <- options$friedmanWithinFactor
+  betweenTerm <- options$friedmanBetweenFactor
+  
+  withinTerms.base64 <- .v(withinTerms)
+  betweenTerms.base64 <- .v(betweenTerm)
+  
+  result <- list()
+  
+  if( any(!(withinTerms %in% unlist(options$withinModelTerms))) | 
+      (betweenTerm %in% unlist(options$withinModelTerms)) ) {
+    friedmanTable$setError("Please specify appropriate terms for the Friedman/Durbin test.")
+    return()
+  }
+  
+  if (identical(betweenTerm, "")) {
+    betweenTerms.base64 <- 'subject'
+  }
+  
+  rows <- list()
+  
+  for (i in 1:length(withinTerms)) {
+    
+    groups <- as.factor(longData[, withinTerms.base64[i]])
+    blocks <- as.factor(longData[, betweenTerms.base64])
+    y <- longData[, "XZGVwZW5kZW50"]
+    
+    useDurbin <- any(table(groups, blocks) != 1)
+    
+    t <- nlevels(groups)
+    b <- nlevels(blocks)
+    r <- unique(table(groups))
+    k <- unique(table(blocks))
+    
+    if (length(r) == 1 & length(k) == 1) {
+      rankPerBlock <- unlist(tapply(y, blocks, rank))
+      rankPerGroup <- unlist(tapply(y, groups, rank))    
       
-      rows <- list()
+      rankJ <- tapply(rankPerBlock, groups, sum)    
       
-      for(k in 1:nRows) {
+      sumRanks <- sum(rankPerBlock^2)
+      cVal <- (b * k * (k + 1)^2) / 4
+      dVal <- sum(rankJ^2) - r * cVal
+      testStatOne <- (t - 1) / (sumRanks - cVal) * dVal
+      testStatTwo <- (testStatOne / (t - 1)) / ((b * k - b - testStatOne) / (b * k - b - t + 1))
+      
+      ## Code from PMCMRplus
+      dfChi <- t - 1
+      dfOneF <- k - 1
+      dfTwoF <- b * k - b - t + 1 
+      pValOne <- pchisq(testStatOne, dfChi, lower.tail = FALSE)
+      pValTwo <- pf(testStatTwo, dfOneF, dfTwoF, lower.tail = FALSE)
+      
+      # Kendall W
+      rankMatrixRM <- matrix(rankPerGroup, ncol = t)
+      rowSumsMatrix <- rowSums(rankMatrixRM)
+      nTies <- unlist(apply(rankMatrixRM, 2, function(x) {
+        tab <- table(x)
+        tab[tab > 1] }))
+      nTies <- sum(nTies^3 - nTies)
+      kendallW <- (sum(rowSumsMatrix^2) - sum(rowSumsMatrix)^2 / b) / (t^2 * (b^3 - b) / 12)
+      kendallWcor <-(sum(rowSumsMatrix^2) - sum(rowSumsMatrix)^2 / b) / ((t^2 * (b^3 - b) - t * nTies) / 12)
+      
+      row <- list()
+      
+      row[["Factor"]] <- withinTerms[i]
+      row[["chiSqr"]] <- testStatOne
+      row[["df"]] <- dfChi
+      row[["p"]] <- pValOne
+      row[["kendall"]] <- kendallWcor
+
+      if (useDurbin) {
+        friedmanTable[["title"]] <- "Durbin Test"
         
-        row <- list()
+        row[["F"]] <- testStatTwo
+        row[["dfnum"]] <- dfOneF
+        row[["dfden"]] <- dfTwoF
+        row[["pF"]] <- pValTwo 
         
-        for(j in 1:nCol) {
-          row[[ .unv(colnames(cases)[j]) ]] <- .unv(cases[k,j])
+        if (i == 1) {
+          friedmanTable$addColumnInfo(name="F", type="number")
+          friedmanTable$addColumnInfo(name="dfnum", title="df num", type="integer")
+          friedmanTable$addColumnInfo(name="dfden", title="df den", type="integer")
+          friedmanTable$addColumnInfo(name="pF", title="p<sub>F</sub>",type="number")
         }
         
-        if(nCol > 1) {
-          index <- apply(r[,1:nCol], 1, function(x) all(x==cases[k,]))
-        } else {
-          index <- k
-        }
-        
-        row[["Marginal Mean"]] <- .clean(r$bootMed[index])
-        row[["Bias"]] <- .clean(r$bootBias[index])
-        row[["SE"]] <- .clean(r$bootSE[index])
-        row[["Lower"]] <- .clean(r$lower.CL[index])
-        row[["Upper"]] <- .clean(r$upper.CL[index])
-        
-        
-        if(cases[k,nCol] == lvls[[ nCol ]][1]) {
-          row[[".isNewGroup"]] <- TRUE
-        } else {
-          row[[".isNewGroup"]] <- FALSE
-        }
-        
-        rows[[k]] <- row
-        
-      }
+      } 
       
-      result[["data"]] <- rows
-      result[["status"]] <- "complete"
+      rows[[i]] <- row
       
     } else {
       
-      rows <- list()
+      friedmanTable$setError("Specified ANOVA design is not balanced.")
+      return()
       
-      for(k in 1:nRows) {
+    }
+    
+  }
+
+  friedmanTable$setData(as.data.frame(do.call(rbind,rows)))
+  
+  return()
+}
+
+.rmAnovaConoverTable <- function(rmAnovaContainer, longData, options, ready) {
+  if (!is.null(rmAnovaContainer[["friedmanContainer"]][["conoverContainer"]]) || options$conoverTest == FALSE))
+    return ()
+  # Todo - put in function for nonpara container and fix state
+   
+  conoverContainer <- createJaspContainer("Conover Test")
+  rmAnovaContainer[["friedmanContainer"]][["conoverContainer"]] <- conoverContainer
+  conoverContainer$dependOn(c("conoverTest"))
+  
+  createConoverTable <- function(myTitle) {
+    
+    conoverTable <- createJaspTable(title = paste0("Conover's Post Hoc Comparisons - ", myTitle))
+    
+    conoverTable$addColumnInfo(name="(I)",title="", type="string", combine=TRUE)
+    conoverTable$addColumnInfo(name="(J)",title="", type="string")
+    conoverTable$addColumnInfo(name="t",  title="T-Stat", type="number")
+    conoverTable$addColumnInfo(name="df", type="integer")
+    conoverTable$addColumnInfo(name="wA", title="W<sub>i</sub>", type="number")
+    conoverTable$addColumnInfo(name="wB", title="W<sub>j</sub>", type="number")
+    conoverTable$addColumnInfo(name="pval", title="p", type="number")
+    conoverTable$addColumnInfo(name="bonferroni", title="p<sub>bonf</sub>", type="number")
+    conoverTable$addColumnInfo(name="holm",title="p<sub>holm</sub>", type="number")
+    
+    return(conoverTable)
+  }
+
+  
+  if (!ready)
+    return()
+  
+  
+  groupingVariables <- unlist(options$friedmanWithinFactor)
+  blockingVar <- ifelse( identical(options$friedmanBetweenFactor, ""), "Xc3ViamVjdA", .v(options$friedmanBetweenFactor))
+  y <- longData[, "XZGVwZW5kZW50"]
+
+  for (groupingVar in groupingVariables) {
+    
+    conoverTable <- createConoverTable(groupingVar)
+    conoverTable$addFootnote(paste0("Grouped by ", .unv(blockingVar),"."))
+    
+    rows <- list()
+    
+    groups <- as.factor(longData[, .v(groupingVar)])
+    blocks <- as.factor(longData[, blockingVar])
+    
+    groupNames <- levels(groups)
+    ## Code from PMCMRplus
+    t <- nlevels(groups)
+    b <- nlevels(blocks)
+    r <- unique(table(groups))
+    k <- unique(table(blocks)) 
+    rij <- unlist(tapply(y, blocks, rank))
+    Rj <- unname(tapply(rij, groups, sum))
+    
+    df <- b * k - b - t + 1
+    
+    S2 <- 1 / ( 1 * t -1 ) * (sum(rij^2) - t * b * ( t + 1)^2 / 4)
+    T2 <- 1 / S2 * (sum(Rj) - b * ((t + 1) / 2)^2)
+    A <- S2 * (2 * b * (t - 1)) / ( b * t - t - b + 1)
+    B <- 1 - T2 / (b * (t- 1))
+    denom <- sqrt(A) * sqrt(B)
+
+    for (i in 1:t) {
+      
+      for (j in .seqx(i+1, t)) {
         
-        row <- list()
+        row <- list("(I)"=groupNames[[i]], "(J)"=groupNames[[j]])
         
-        for(j in 1:nCol)
-          row[[ .unv(colnames(cases)[j]) ]] <- .unv(cases[k,j])
+        diff <-  abs(Rj[i] - Rj[j]) 
+        tval <- diff / denom
+        pval <- 2 * pt(q = abs(tval), df = df, lower.tail=FALSE)
         
-        row[["Marginal Mean"]] <- "."
-        row[["Bias"]] <- "."
-        row[["SE"]] <- "."
-        row[["Lower"]] <- "."
-        row[["Upper"]] <- "."
+        row[["t"]] <- tval
+        row[["wA"]]  <- Rj[i]
+        row[["wB"]] <- Rj[j]
+        row[["pval"]] <- pval
+        row[["bonferroni"]] <- pval
+        row[["holm"]] <- pval
+        row[["df"]] <- df
         
-        if(cases[k,nCol] == lvls[[ nCol ]][1]) {
-          row[[".isNewGroup"]] <- TRUE
-        } else {
-          row[[".isNewGroup"]] <- FALSE
-        }
-        
-        rows[[k]] <- row
+        rows[[length(rows)+1]] <- row
         
       }
       
-      result[["data"]] <- rows
+      if (length(rows) == 0)  {
+        row[[".isNewGroup"]] <- TRUE
+      } else {
+        row[[".isNewGroup"]] <- FALSE
+      }
     }
     
-    result[["footnotes"]] <- as.list(footnotes)
+      
+    allP <- unlist(lapply(rows, function(x) x$p))
+    allBonf <- p.adjust(allP, method = "bonferroni")
+    allHolm <- p.adjust(allP, method = "holm")
     
-    if (status$error)
-      result[["error"]] <- list(error="badData")
-    
-    marginalMeans[[i]] <- result
-    
+    for (p in 1:length(rows)) {
+      rows[[p]][['bonferroni']] <- allBonf[p]
+      rows[[p]][['holm']] <- allHolm[p]
+    }
+      
+   browser() 
+    conoverTable$setData(as.data.frame(do.call(rbind, rows)))
+    rmAnovaContainer[["friedmanContainer"]][[groupingVar]] <- conoverTable
   }
   
-  
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    stateMarginalMeans <- marginalMeans
-    
-  } else {
-    
-    stateMarginalMeans <- NULL
-    
-  }
-  list(result=marginalMeans, status=status, stateMarginalMeansBoots=stateMarginalMeans)
+  return()
 }
 
-.optionsDiffCheckBootstrapRMAnovaMarginalMeans <- function(response, options) {
-  if(response$status == "changed"){
-    change <- .diff(options, response$options)
-    
-    if(change$repeatedMeasuresCells || change$covariates || change$betweenSubjectFactors ||
-       change$withinModelTerms || change$marginalMeansTerms ||
-       change$marginalMeansBootstrapping || change$marginalMeansBootstrappingReplicates)
-      return(response)
-    
-    response$status <- "ok"
-  }
-  
-  return(response)
-}
 
 .rmAnovaSimpleEffects <- function(dataset, options, perform, fullModel, fullAnovaTableWithin, 
                                   fullAnovaTableBetween, status, singular, stateSimpleEffects) {
@@ -2085,295 +2063,6 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   list(result=simpleEffectsTable, status=status, stateSimpleEffects=stateSimpleEffects)
 }
 
-.rmAnovaFriedman <- function(dataset, fullModel, options, perform, status, singular, stateFriedman) {
-  
-  if (length(options$friedmanWithinFactor) == 0)
-    return (list(result=NULL, status=status))
-  
-  withinTerms <- options$friedmanWithinFactor
-  betweenTerm <- options$friedmanBetweenFactor
-  
-  withinTerms.base64 <- .v(withinTerms)
-  betweenTerms.base64 <- .v(betweenTerm)
-  
-  result <- list()
-  
-  if( any(!(withinTerms %in% unlist(options$withinModelTerms))) | 
-      (betweenTerm %in% unlist(options$withinModelTerms)) ) {
-    status$error <- TRUE
-    status$errorMessage <- "Please specify appropriate terms for the Friedman/Durbin test."
-    result[["error"]] <- list(errorType="badData", errorMessage=status$errorMessage)
-  }
-  
-  result[["title"]] <- paste("Friedman Test")
-  result[["name"]] <- paste("friedmanTable")
-  
-  fields <- list()
-  fields[[length(fields) + 1]] <- list(name="Factor", type="string")
-  fields[[length(fields) + 1]] <- list(name="Chi-Squared", type="number", format="sf:4;dp:3")
-  fields[[length(fields) + 1]] <- list(name="df", type="integer")
-  fields[[length(fields) + 1]] <- list(name="p", type="number", format="dp:3;p:.001")
-  fields[[length(fields) + 1]] <- list(name="Kendall's W", type="number", format="sf:4;dp:3")
-  # fields[[length(fields) + 1]] <- list(name="Kendall's W corr.", type="number", format="sf:4;dp:3")
-  
-  footnotes <- .newFootnotes()
-  
-  rows <- list()
-  
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    longData <- fullModel$data$long
-    
-    if (identical(betweenTerm, "")) {
-      betweenTerms.base64 <- 'subject'
-    }
-    
-    for (i in 1:length(withinTerms)) {
-      
-      groups <- as.factor(longData[, withinTerms.base64[i]])
-      blocks <- as.factor(longData[, betweenTerms.base64])
-      y <- longData[, 'dependent']
-      
-      useDurbin <- any(table(groups, blocks) != 1)
-      
-      t <- nlevels(groups)
-      b <- nlevels(blocks)
-      r <- unique(table(groups))
-      k <- unique(table(blocks))
-      
-      
-      if (length(r) == 1 & length(k) == 1) {
-        rankPerBlock <- unlist(tapply(y, blocks, rank))
-        rankPerGroup <- unlist(tapply(y, groups, rank))    
-        
-        rankJ <- tapply(rankPerBlock, groups, sum)    
-        
-        sumRanks <- sum(rankPerBlock^2)
-        cVal <- (b * k * (k + 1)^2) / 4
-        dVal <- sum(rankJ^2) - r * cVal
-        testStatOne <- (t - 1) / (sumRanks - cVal) * dVal
-        testStatTwo <- (testStatOne / (t - 1)) / ((b * k - b - testStatOne) / (b * k - b - t + 1))
-        
-        ## Code from PMCMRplus
-        dfChi <- t - 1
-        dfOneF <- k - 1
-        dfTwoF <- b * k - b - t + 1 
-        pValOne <- pchisq(testStatOne, dfChi, lower.tail = FALSE)
-        pValTwo <- pf(testStatTwo, dfOneF, dfTwoF, lower.tail = FALSE)
-        
-        # Kendall W
-        rankMatrixRM <- matrix(rankPerGroup, ncol = t)
-        rowSumsMatrix <- rowSums(rankMatrixRM)
-        nTies <- unlist(apply(rankMatrixRM, 2, function(x) {
-          tab <- table(x)
-          tab[tab > 1] }))
-        nTies <- sum(nTies^3 - nTies)
-        kendallW <- (sum(rowSumsMatrix^2) - sum(rowSumsMatrix)^2 / b) / (t^2 * (b^3 - b) / 12)
-        kendallWcor <-(sum(rowSumsMatrix^2) - sum(rowSumsMatrix)^2 / b) / ((t^2 * (b^3 - b) - t * nTies) / 12)
-        
-        row <- list()
-        
-        row[["Factor"]] <- withinTerms[i]
-        row[["Chi-Squared"]] <- .clean(testStatOne)
-        row[["df"]] <- .clean(dfChi)
-        row[["p"]] <- .clean(pValOne)
-        row[["Kendall's W"]] <- .clean(kendallWcor)
-        # row[["Kendall's W corr."]] <- .clean(kendallWcor)
-        
-        
-        if (useDurbin) {
-          result[["title"]] <- "Durbin Test"
-          
-          row[["F"]] <- .clean(testStatTwo)
-          row[["df num"]] <- .clean(dfOneF)
-          row[["df den"]] <- .clean(dfTwoF)
-          row[["pF"]] <-.clean(pValTwo)
-          
-          if (i == 1) {
-            fields[[length(fields) + 1]] <- list(name="F", type="number", format="sf:4;dp:3")
-            fields[[length(fields) + 1]] <- list(name="df num", type="integer")
-            fields[[length(fields) + 1]] <- list(name="df den", type="integer")
-            fields[[length(fields) + 1]] <- list(name="pF", title="p<sub>F</sub>",type="number", format="dp:3;p:.001")
-          }
-          
-        } 
-        
-        rows[[i]] <- row
-        
-      } else {
-        status$error <- TRUE
-        status$errorMessage <- "Specified ANOVA design is not balanced."
-        result[["error"]] <- list(errorType="badData", errorMessage=status$errorMessage)
-        
-        row <- list()
-        row[["Factor"]] <- "."
-        row[["Statistic"]] <- "."
-        row[["df"]] <- "."
-        row[["p"]] <- "."
-        
-        rows[[i]] <- row
-      }
-    }
-  } else {
-    
-    row <- list()
-    row[["Factor"]] <- "."
-    row[["Statistic"]] <- "."
-    row[["df"]] <- "."
-    row[["p"]] <- "."
-    
-    rows[[1]] <- row
-  }
-  
-  
-  result[["data"]] <- rows
-  result[["status"]] <- "complete"
-  
-  result[["schema"]] <- list(fields=fields)
-  result[["footnotes"]] <- as.list(footnotes)
-  
-  
-  
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    stateFriedman <- result
-    
-  } else {
-    
-    stateFriedman <- NULL
-    
-  }
-  
-  list(result=result, status=status, stateFriedman=stateFriedman)
-}
-
-.rmAnovaConoverTable <- function(dataset, options, perform, fullModel, status, stateConover, singular) {
-  
-  if (options$conoverTest == FALSE | identical(options$friedmanWithinFactor, ""))
-    return (list(result=NULL, status=status))
-  
-  groupingVariables <- unlist(options$friedmanWithinFactor)
-  blockingVar <- ifelse( identical(options$friedmanBetweenFactor, ""), "subject", .v(options$friedmanBetweenFactor))
-  
-  conoverTables <- list()
-  
-  for (groupingVar in groupingVariables) {
-    
-    conoverTable <- list()
-    
-    conoverTable[["title"]] <- paste("Conover's Post Hoc Comparisons - ", groupingVar, sep="")
-    conoverTable[["name"]] <- paste("conoverTest_", groupingVar, sep="")
-    
-    fields <- list(
-      list(name="(I)",title="", type="string", combine=TRUE),
-      list(name="(J)",title="", type="string"),
-      list(name="t",  title="T-Stat", type="number", format="sf:4;dp:3"),
-      list(name="df", type="integer"),
-      list(name="wA", title="W<sub>i</sub>", type="number", format="sf:4;dp:3"),
-      list(name="wB", title="W<sub>j</sub>", type="number", format="sf:4;dp:3"),
-      list(name="pval", title="p", type="number", format="dp:3;p:.001"),
-      list(name="bonferroni", title="p<sub>bonf</sub>", type="number", format="dp:3;p:.001"),
-      list(name="holm",title="p<sub>holm</sub>", type="number", format="dp:3;p:.001")
-    )
-    
-    conoverTable[["schema"]] <- list(fields=fields)
-    
-    rows <- list()
-    
-    if (perform == "run" && status$ready && status$error == FALSE) {
-      
-      longData <- fullModel$data$long
-      
-      groups <- as.factor(longData[, .v(groupingVar)])
-      blocks <- as.factor(longData[, blockingVar])
-      y <- longData[, 'dependent']
-      
-      groupNames <- .unv(levels(groups))
-      ## Code from PMCMRplus
-      t <- nlevels(groups)
-      b <- nlevels(blocks)
-      r <- unique(table(groups))
-      k <- unique(table(blocks)) 
-      rij <- unlist(tapply(y, blocks, rank))
-      Rj <- unname(tapply(rij, groups, sum))
-      
-      df <- b * k - b - t + 1
-      
-      S2 <- 1 / ( 1 * t -1 ) * (sum(rij^2) - t * b * ( t + 1)^2 / 4)
-      T2 <- 1 / S2 * (sum(Rj) - b * ((t + 1) / 2)^2)
-      A <- S2 * (2 * b * (t - 1)) / ( b * t - t - b + 1)
-      B <- 1 - T2 / (b * (t- 1))
-      denom <- sqrt(A) * sqrt(B)
-      
-      for (i in 1:t) {
-        
-        for (j in .seqx(i+1, t)) {
-          
-          row <- list("(I)"=groupNames[[i]], "(J)"=groupNames[[j]])
-          
-          diff <-  abs(Rj[i] - Rj[j]) 
-          tval <- diff / denom
-          pval <- 2 * pt(q = abs(tval), df = df, lower.tail=FALSE)
-          
-          row[["t"]] <- .clean(tval)
-          row[["wA"]]  <- .clean(Rj[i])
-          row[["wB"]] <- .clean(Rj[j])
-          row[["pval"]] <- .clean(pval)
-          row[["bonferroni"]] <- .clean(pval)
-          row[["holm"]] <- .clean(pval)
-          row[["df"]] <- .clean(df)
-          
-          conoverTable[["status"]] <- "complete"
-          rows[[length(rows)+1]] <- row
-          
-        }
-        
-        if (length(rows) == 0)  {
-          row[[".isNewGroup"]] <- TRUE
-        } else {
-          row[[".isNewGroup"]] <- FALSE
-        }
-      }
-      
-      allP <- unlist(lapply(rows, function(x) x$p))
-      allBonf <- p.adjust(allP, method = "bonferroni")
-      allHolm <- p.adjust(allP, method = "holm")
-      
-      for (p in 1:length(rows)) {
-        rows[[p]][['bonferroni']] <- .clean(allBonf[p])
-        rows[[p]][['holm']] <- .clean(allHolm[p])
-      }
-      
-    } else {
-      row <- list("(I)"= ".", "(J)"= ".")
-      row[["t"]] <- "."
-      row[["wA"]]  <- "."
-      row[["wB"]] <- "."
-      row[["pval"]] <- "."
-      row[["bonferroni"]] <- "."
-      row[["holm"]] <- "."
-      row[["df"]] <- "."
-      
-      rows[[length(rows)+1]] <- row
-    }
-    
-    conoverTable[["data"]] <- rows
-    
-    conoverTables[[length(conoverTables)+1]] <- conoverTable
-  }
-  
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    stateConover <- conoverTables
-    
-  } else {
-    
-    stateConover <- NULL
-    
-  }
-  
-  list(result=conoverTables, status=status, stateConover=stateConover)
-}
 
 .rmAnovaDescriptivesTable <- function(dataset, options, perform, status, stateDescriptivesTable) {
   

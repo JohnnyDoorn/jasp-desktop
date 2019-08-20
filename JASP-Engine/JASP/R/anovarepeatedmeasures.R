@@ -60,7 +60,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   .rmAnovaPostHocTable(rmAnovaContainer, dataset, options, ready)
 
   ## Create Contrast Tables
-  .rmAnovaContrastTable(rmAnovaContainer, dataset, options, ready)
+  .rmAnovaContrastTable(rmAnovaContainer, longData, options, ready)
 
   ## Create Marginal Means Tables
   .rmAnovaMarginalMeansTable(rmAnovaContainer, dataset, options, ready)
@@ -70,14 +70,12 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   
   .rmAnovaConoverTable(rmAnovaContainer, longData, options, ready)
   
+  ## Create Simple Effects Table
+  .rmAnovaSimpleEffects(rmAnovaContainer, dataset, longData, options, ready) 
+  
   return()
   
-  
-  
-  ## Create Simple Effects Table
-  result <- .rmAnovaSimpleEffects(dataset, options, perform, fullModel, results[["withinSubjectsEffects"]], 
-                                  results[["betweenSubjectsEffects"]], status, singular, stateSimpleEffects)
-  
+ 
   
   
   # Create Conover Table
@@ -299,7 +297,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   
   for (i in variables)
     dataset[[.v(i)]] <- .v(dataset[[.v(i)]])
-  
+
   options(contrasts=c("contr.sum","contr.poly"))
   
   # set these options once for all afex::aov_car calls,
@@ -411,12 +409,18 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
                                                                      (df / (n * (df + 1))) * (MSm - MSr))
   sortedModel[["omega"]] <- sapply(omega, max, 0)
   # Now we include the results from the corrections
+  for (i in .indices(summaryResult)) {
+    if (any(rownames(summaryResult[[i]]) == "(Intercept)")) 
+      summaryResult[[i]] <- summaryResult[[i]][-1, ]
+  }
+  
   corrections <- summaryResult$pval.adjustments
+  # if (any(rownames(corrections) == "(Intercept)")) corrections <- corrections[-1, ]
   withinAnovaTable <- ggTable <- hfTable <- subset(sortedModel, isWithinTerm == 1)
-  withinIndices <- .mapAnovaTermsToTerms(rownames(sortedModel), rownames(corrections))
+  withinIndices <- .mapAnovaTermsToTerms(rownames(withinAnovaTable), rownames(corrections))
   
   withinAnovaTable[["correction"]] <- "None"
-  
+
   ggTable[["num Df"]] <- withinAnovaTable[["num Df"]] * corrections[withinIndices, "GG eps"]
   ggTable[["Mean Sq"]] <-  withinAnovaTable[["Sum Sq"]] / ggTable[["num Df"]]
   ggTable[["den Df"]] <- withinAnovaTable[["den Df"]] * corrections[withinIndices, "GG eps"]
@@ -425,9 +429,9 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   ggTable[["correction"]] <-  "Greenhouse-Geisser"
   ggTable[[".isNewGroup"]] <- FALSE 
   
+  hfTable[["num Df"]] <-  withinAnovaTable[["num Df"]] * corrections[withinIndices, "HF eps"]
   hfTable[["Mean Sq"]] <- withinAnovaTable[["Sum Sq"]] / hfTable[["num Df"]]
-  hfTable[["num Df"]] <-  withinAnovaTable[["num Df"]] * corrections[, "HF eps"]
-  hfTable[["den Df"]] <- withinAnovaTable[["den Df"]] * corrections[, "HF eps"]
+  hfTable[["den Df"]] <- withinAnovaTable[["den Df"]] * corrections[withinIndices, "HF eps"]
   hfTable[["Pr(>F)"]] <-  pf(withinAnovaTable[["F value"]], hfTable[["num Df"]], 
                              hfTable[["den Df"]], lower.tail = FALSE)
   hfTable[["correction"]] <-  "Huyn-Feldt"
@@ -445,6 +449,11 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   wResidualResultsHF[["Mean Sq"]] <- wResidualResults[["Sum Sq"]] / wResidualResultsHF[["num Df"]]
   wResidualResultsHF[["correction"]] <-  "Huyn-Feldt"
   
+  if (nrow(summaryResult$sphericity.tests) == 0) 
+    summaryResult$sphericity.tests <- data.frame(Test = rep(NA, nrow(sortedModel)),
+                                                 statistic = rep(NA, nrow(sortedModel)),
+                                                 p = rep(NA, nrow(sortedModel)))
+
   withinAnovaTable <- cbind(withinAnovaTable, corrections[withinIndices, ], 
                             summaryResult$sphericity.tests[withinIndices, ])
   # Makes lists with results and insert Intercept row back in anova table
@@ -455,7 +464,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   }
   sortedModel[["VovkSellkeMPR"]] <- .VovkSellkeMPR(sortedModel[["Pr(>F)"]])
   
-  
+  wResidualResults["BetweenResidualResults", c("Sum Sq", "num Df")] <- interceptRow[, c("Error SS", "den Df")]
+  wResidualResults["BetweenResidualResults", "Mean Sq"] <- interceptRow[["Error SS"]] / interceptRow[["den Df"]]
   wResidualResultsList <- list("None" = wResidualResults, "Huyn-Feldt" = wResidualResultsHF, 
                                "Greenhouse-Geisser" = wResidualResultsGG)
   # sortedModel["Intercept", ] <-  c(interceptRow, 0, 0, "Residuals", rep(NA, ncol(sortedModel)-3))
@@ -485,18 +495,6 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   }
   
   return(indices)
-}
-
-.identicalTerms <- function(x,y) {
-  
-  equalLength <- length(x) == length(y)
-  equalTerms <- all(x %in% y)
-  
-  if(equalLength && equalTerms) {
-    return(TRUE)
-  } else {
-    return(FALSE)
-  }
 }
 
 .rmAnovaBetweenSubjectsTable <- function(rmAnovaContainer, dataset, options, ready) {
@@ -673,8 +671,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   residualResults <- rmAnovaContainer[["anovaResult"]]$object$residualTable
   modelTerms <- .rmModelFormula(options)$termsRM.base64
   allCases <- rownames(withinResults[[1]])
-  addResidualAfter <- allCases[.mapAnovaTermsToTerms(modelTerms, allCases) + 1]
-  
+  addResidualAfter <- allCases[.mapAnovaTermsToTerms(modelTerms, allCases) + (length(allCases) / length(modelTerms)) - 1]
+  # browser()
   for (case in allCases) {
     
     for (cor in corrections)
@@ -1173,7 +1171,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   contr
 }
 
-.rmAnovaContrastTable <- function(rmAnovaContainer, dataset, options, ready) {
+.rmAnovaContrastTable <- function(rmAnovaContainer, longData, options, ready) {
   if (!is.null(rmAnovaContainer[["contrastContainer"]]) || all(grepl("none", options$contrasts)))
     return()
   
@@ -1235,8 +1233,8 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   for (contrast in options$contrasts) {
     
     if (contrast$contrast != "none") {
-      column <- longDataset[[.v(contrast$variable)]]
-      contrastMatrix <- .rmAnovaCreateContrast(column, contrast)
+      column <- longData[[.v(contrast$variable)]]
+      contrastMatrix <- .rmAnovaCreateContrast(column, contrast$contrast)
       contrCoef <- lapply(as.data.frame(contrastMatrix), as.vector)
       names(contrCoef) <- .v(.anovaContrastCases(column, contrast$contrast))
       
@@ -1251,10 +1249,16 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
       
       # New feature - verify To do!!!!
       if (options$contrastAssumeEqualVariance == FALSE) {
-        newDF <- do.call(data.frame, tapply(longDataset[["XZGVwZW5kZW50"]], longDataset[[.v(contrast$variable)]], cbind))
+        newDF <- do.call(data.frame, tapply(longData[["XZGVwZW5kZW50"]], longData[[.v(contrast$variable)]], cbind))
+        ssNr <- tapply(longData[["Xc3ViamVjdA"]], longData[[.v(contrast$variable)]], cbind)
+        
+        for (i in 1:ncol(newDF)) {
+          newDF[[i]] <- tapply(newDF[[i]], ssNr[[i]], mean)
+        }
+        newDF <- newDF[1:length(unique(ssNr[[1]])), ]
         
         allTestResults <- list()
-        
+
         for (coefIndex in 1:length(contrCoef)) {
           allTestResults[[coefIndex]] <- t.test(as.matrix(newDF) %*% contrCoef[[coefIndex]])
         }
@@ -1501,14 +1505,14 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   
   result <- list()
   
-  if( any(!(withinTerms %in% unlist(options$withinModelTerms))) | 
+  if( any(!(withinTerms %in% unlist(options$withinModelTerms))) || 
       (betweenTerm %in% unlist(options$withinModelTerms)) ) {
     friedmanTable$setError("Please specify appropriate terms for the Friedman/Durbin test.")
     return()
   }
   
   if (identical(betweenTerm, "")) {
-    betweenTerms.base64 <- 'subject'
+    betweenTerms.base64 <- "Xc3ViamVjdA"
   }
   
   rows <- list()
@@ -1564,7 +1568,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
       row[["kendall"]] <- kendallWcor
 
       if (useDurbin) {
-        friedmanTable[["title"]] <- "Durbin Test"
+        friedmanTable$title <- "Durbin Test"
         
         row[["F"]] <- testStatTwo
         row[["dfnum"]] <- dfOneF
@@ -1597,7 +1601,7 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
 }
 
 .rmAnovaConoverTable <- function(rmAnovaContainer, longData, options, ready) {
-  if (!is.null(rmAnovaContainer[["friedmanContainer"]][["conoverContainer"]]) || options$conoverTest == FALSE))
+  if (!is.null(rmAnovaContainer[["friedmanContainer"]][["conoverContainer"]]) || options$conoverTest == FALSE)
     return ()
   # Todo - put in function for nonpara container and fix state
    
@@ -1697,7 +1701,6 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
       rows[[p]][['holm']] <- allHolm[p]
     }
       
-   browser() 
     conoverTable$setData(as.data.frame(do.call(rbind, rows)))
     rmAnovaContainer[["friedmanContainer"]][[groupingVar]] <- conoverTable
   }
@@ -1705,364 +1708,186 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
   return()
 }
 
-
-.rmAnovaSimpleEffects <- function(dataset, options, perform, fullModel, fullAnovaTableWithin, 
-                                  fullAnovaTableBetween, status, singular, stateSimpleEffects) {
+.rmAnovaSimpleEffects <- function(rmAnovaContainer, dataset, longData, options, ready) {
+  if (!is.null(rmAnovaContainer[["simpleEffectsContainer"]]) || identical(options$simpleFactor, "") || 
+      identical(options$moderatorFactorOne, ""))
+    return()
   
-  if (identical(options$simpleFactor, "") | identical(options$moderatorFactorOne, "")) {
-    return (list(result=NULL, status=status))
-  }
+  rmAnovaContainer[["simpleEffectsContainer"]] <- createJaspContainer(title = "Simple Main Effects",
+                                                                      dependencies = c("simpleFactor", 
+                                                                                       "moderatorFactorOne", 
+                                                                                       "moderatorFactorTwo"))
   
+  simpleEffectsTable <- createJaspTable(title = paste0("Simple Main Effects - ", options$simpleFactor))
+  rmAnovaContainer[["simpleEffectsContainer"]][["simpleEffectsTable"]] <- simpleEffectsTable
   
-  terms <- c(options$moderatorFactorOne,options$moderatorFactorTwo)
-  terms.base64 <- c()
-  terms.normal <- c()
-  simpleFactor.base64 <- .v(options[['simpleFactor']])
+  moderatorTerms <- c(options$moderatorFactorOne, options$moderatorFactorTwo[!identical(options$moderatorFactorTwo, "")])
+  nMods <- length(moderatorTerms)
   simpleFactor <- options[['simpleFactor']]
-  moderatorFactorOne <- options[['moderatorFactorOne']]
-  moderatorFactorTwo <- options[['moderatorFactorTwo']]
+  simpleFactorBase64 <- .v(simpleFactor)
   
-  for (term in terms) {
-    
-    components <- unlist(term)
-    term.base64 <- paste(.v(components), collapse=":", sep="")
-    term.normal <- paste(components, collapse=" \u273B ", sep="")
-    
-    terms.base64 <- c(terms.base64, term.base64)
-    terms.normal <- c(terms.normal, term.normal)
-  }
+  simpleEffectsTable[["title"]] <- paste("Simple Main Effects - ", options$simpleFactor, sep = "")
   
-  simpleEffectsTable <- list()
-  simpleEffectsTable[["title"]] <- paste("Simple Main Effects - ", simpleFactor, sep = "")
+  simpleEffectsTable$addColumnInfo(name = "modOne", title = paste0("Level of ", moderatorTerms[1]), 
+                                   type = "string", combine = TRUE)
   
-  fields <- list(
-    list(name="ModOne", type="string", combine = TRUE, title = paste0("Level of ", terms.normal[1])),
-    list(name="ModTwo", type="string", combine = TRUE, title = paste0("Level of ", terms.normal[2])),
-    list(name="SumSquares", type="number", format="sf:4;dp:3", title = "Sum of Squares"),
-    list(name="df", type="integer", title = "df"),
-    list(name="MeanSquare", type="number", format="sf:4;dp:3", title = "Mean Square"),
-    list(name="F", type="number", format="sf:4;dp:3", title = "F"),
-    list(name="p", type="number", format="dp:3;p:.001", title = "p"))
+  if (nMods == 2)
+    simpleEffectsTable$addColumnInfo(name = "modTwo", title = paste0("Level of ", moderatorTerms[2]), 
+                                     type = "string", combine = TRUE)
   
-  # If there is no second moderator, so remove from table:
-  if (identical(options$moderatorFactorTwo, ""))
-    fields <- fields[-2]
   
-  footnotes <- .newFootnotes()
+  simpleEffectsTable$addColumnInfo(name = "SumSq", type = "number", title = "Sum of Squares")
+  simpleEffectsTable$addColumnInfo(name = "Df", type = "integer", title = "df")
+  simpleEffectsTable$addColumnInfo(name = "MeanSq", type = "number", title = "Mean Square")
+  simpleEffectsTable$addColumnInfo(name = "F", type = "number")
+  simpleEffectsTable$addColumnInfo(name = "p", type = "number")
   
-  simpleEffectsTable[["schema"]] <- list(fields=fields)
+  simpleEffectsTable$showSpecifiedColumnsOnly <- TRUE
   
-  if (perform == "run" && status$ready && status$error == FALSE && !isTryError(fullModel))  {
-    
-    isMixedAnova <-   length(options[['betweenSubjectFactors']]) > 0
-    isSimpleFactorWithin <- !simpleFactor %in% unlist(options[['betweenModelTerms']] )
-    isModeratorOneWithin <- !moderatorFactorOne %in% unlist(options[['betweenModelTerms']] )
-    isModeratorTwoWithin <- !moderatorFactorTwo %in% unlist(options[['betweenModelTerms']] )
-    errorIndexWithin <- length(fullAnovaTableWithin$data)
-    errorIndexBetween <-  length(fullAnovaTableBetween$data)
-    ssWithin <- fullAnovaTableWithin$data[[errorIndexWithin]]$SS
-    ssBetween <- fullAnovaTableBetween$data[[errorIndexBetween]]$SS
-    dfWithin <- fullAnovaTableWithin$data[[errorIndexWithin]]$df
-    dfBetween <- fullAnovaTableBetween$data[[errorIndexBetween]]$df
-    fullAnovaTable <- fullAnovaTableWithin
-    tableCounter <- 1
-    if(isMixedAnova & isSimpleFactorWithin){
-      fullAnovaMS <- ssWithin / dfWithin
-      fullAnovaDf <- dfWithin
-    } else if(isMixedAnova & !isSimpleFactorWithin){
-      fullAnovaMS <- ssBetween / dfBetween
-      fullAnovaDf <- dfBetween
-    } else {
-      fullAnovaMS <- fullAnovaTable$data[[length(fullAnovaTable$data)]]$MS 
-      fullAnovaDf <- fullAnovaTable$data[[length(fullAnovaTable$data)]]$df
-    }
-    
-    
-    simpleEffectRows <- list()
-    rows <- list()
-    
-    termsBothModerators <- as.vector(c(moderatorFactorOne, moderatorFactorTwo))
-    if(identical(moderatorFactorTwo, "")) {
-      termsBothModerators <- termsBothModerators[1]
-    }
-    
-    lvls <- list()
-    factors <- list()
-    
-    for (variable in termsBothModerators) {
-      if (variable %in% unlist(options[['withinModelTerms']])) {
-        whichFactor <- unlist(lapply(options[['repeatedMeasuresFactors']], 
-                                     FUN = function(x){x$name == variable}))
-        lvls[[variable]] <- options$repeatedMeasuresFactors[[which(whichFactor == TRUE)]]$levels 
-      } else if (variable %in% unlist(options[['betweenModelTerms']])) {
-        thisFactor <- dataset[[ .v(variable) ]]
-        factors[[length(factors)+1]] <- thisFactor
-        lvls[[variable]] <- levels(thisFactor)
-      }
-    }
-    #
-    allNames <- unlist(lapply(options[['repeatedMeasuresFactors']], function(x) x$name)) # Factornames 
-    
-    # make separate covariate dataframe to avoid mismatching dataframe names
-    covDataset <- dataset[.v(options[['covariates']])]
-    wideDataset <- fullModel$data$wide[,(-1)]
-    
-    covariatesInModel <- ifelse(length(options[['covariates']]) > 0, TRUE, FALSE)
-    if (covariatesInModel) {
-      dataset <- dataset[, names(dataset) != (.v(options[['covariates']]))]
-      wideDataset <- wideDataset[ -match(covDataset, wideDataset)]
-    }
-    # Following steps to make sure column ordering is the same for the datasets
-    
-    factorNamesV <- colnames(wideDataset)
-    withinFactorNamesV <- factorNamesV[!(.unv(factorNamesV) %in% options[['betweenSubjectFactors']])] 
-    
-    withinOrder <- match(wideDataset, dataset)
-    betweenOrder <- match(names(wideDataset), names(dataset))
-    betweenOrder[is.na(betweenOrder)] <- withinOrder[!is.na(withinOrder)]
-    fullOrder <- betweenOrder
-    
-    dataset <- dataset[fullOrder]
-    # orderOfTerms <- unlist(options[['withinModelTerms']][[length(options[['withinModelTerms']])]]$components)
-    orderOfTerms <- unlist(lapply(options$repeatedMeasuresFactors, function(x) x$name))
-    
-    indexofOrderFactors <- match(allNames,orderOfTerms)
-    
-    for (level in lvls[[1]]) {
-      # For each level of the first moderator factor, take a subset of the dataset, and adjust the options object
-      # Suboptions is the same as options, except that the first moderator factor has been removed as a predictor 
-      # (because each subset only has one level of that factor). The same procedure is applied to the second moderator, if specified.
-      
-      subOptions <- options
-      # subOptions[['covariates']] <- list()
-      # Prepare the options object to handle the contional dataset
-      # Based on whether the first moderator variable is within or between
-      if (isModeratorOneWithin) {
-        rmFactorIndex <- which(lapply(options[['repeatedMeasuresFactors']], 
-                                      FUN = function(x){x$name == moderatorFactorOne}) == TRUE)
-        splitNames <- unlist(lapply(strsplit(factorNamesV,  split = "_"), 
-                                    FUN = function(x) x[indexofOrderFactors[rmFactorIndex]]))
-        splitWithinNames <- unlist(lapply(strsplit(withinFactorNamesV,  split = "_"), 
-                                          FUN = function(x) x[indexofOrderFactors[rmFactorIndex]]))
-        subDataset <- dataset[, ((splitNames %in% .v(level)) | (names(dataset)) %in% .v(options[['betweenSubjectFactors']]))]
-        subCovDataset <- covDataset
-        subFactorNamesV <- factorNamesV[((splitNames %in% .v(level)) | (names(dataset)) %in% .v(options[['betweenSubjectFactors']]))]
-        whichFactorsBesidesModerator <- !unlist(lapply((options[['withinModelTerms']]), FUN = function(x){grepl(moderatorFactorOne, x)}))
-        subOptions[['withinModelTerms']] <- options[['withinModelTerms']][whichFactorsBesidesModerator]
-        subOptions[['repeatedMeasuresFactors']] <- options[['repeatedMeasuresFactors']][-rmFactorIndex]
-        subOptions[['repeatedMeasuresCells']]<- options$repeatedMeasuresCells[(splitWithinNames %in% .v(level))]
-      } else {
-        subDataset <- subset(dataset, dataset[terms.base64[1]] == level)
-        if (covariatesInModel) {
-          subCovDataset  <- subset(covDataset, dataset[terms.base64[1]] == level)
-        } else {
-          subCovDataset <- covDataset[dataset[terms.base64[1]] == level,] 
-        }
-        subFactorNamesV <- factorNamesV
-        whichTermsBesidesModerator <- !unlist(lapply((options[['betweenModelTerms']]), FUN = function(x){grepl(moderatorFactorOne, x)}))
-        whichFactorsBesidesModerator <- !unlist(lapply((options[['betweenSubjectFactors']]), FUN = function(x){grepl(moderatorFactorOne, x)}))
-        
-        subOptions[['betweenModelTerms']] <- options[['betweenModelTerms']][whichTermsBesidesModerator]
-        subOptions[['betweenSubjectFactors']] <- options[['betweenSubjectFactors']][whichFactorsBesidesModerator]
-      }
-      areSimpleFactorCellsDropped <- ifelse(isSimpleFactorWithin, FALSE, (nrow(unique(subDataset[simpleFactor.base64])) <  
-                                                                            nrow(unique(dataset[simpleFactor.base64]))))
-      model <- NULL
-      singular <- FALSE
-      if (identical(moderatorFactorTwo, "")) {
-        # This means there is only one moderator variable (i.e., one factor on which to condition)
-        newGroup <- ifelse( level == lvls[[1]][1], TRUE, FALSE )
-        if (nrow(subDataset) < 3 || areSimpleFactorCellsDropped ) {
-          row <- list("ModOne"=level, "SumSquares"=".", "df"=".", "MeanSquare"=".", "F"=".", "p"=".", ".isNewGroup" = newGroup)
-          .addFootnote(footnotes, text = paste0("Not enough observations in cell ", level, " of ", subOptions$moderatorFactorOne), 
-                       symbol = "<em>Note.</em>")
-        } else {
-          if (length(subOptions[['repeatedMeasuresFactors']]) > 0) {
-            # There are still multiple levels of RM factors, so proceed with conditional RM ANOVA
-            anovaModel <- .rmAnovaComputeResults(cbind(subDataset, subCovDataset), subOptions, status = status)
-            modelSummary <- anovaModel$model
-            if (subOptions$sumOfSquares != "type1") {
-              modOneIndex <- which(row.names(modelSummary) == .v(simpleFactor))
-              df <- modelSummary[modOneIndex,'num Df']
-              SS <- modelSummary[modOneIndex,'Sum Sq']  
-              if (!options$poolErrorTermSimpleEffects) {
-                fullAnovaMS <- modelSummary[modOneIndex,'Error SS'] / modelSummary[modOneIndex,'den Df']
-                fullAnovaDf <- modelSummary[modOneIndex,'den Df']
-              }
-            } else {
-              modelSummary <- modelSummary[[-1]][[1]]
-              modOneIndex <- which(row.names(modelSummary) == .v(simpleFactor))
-              df <- modelSummary[modOneIndex,'Df']
-              SS <- modelSummary[modOneIndex,'Sum Sq']   
-              if (!options$poolErrorTermSimpleEffects) {
-                fullAnovaMS <- modelSummary['Residuals','Mean Sq']
-                fullAnovaDf <- modelSummary['Residuals','Df']
-              }
-            }
-            
-          } else {
-            # There is only one level of RM factor left, so proceed with conditional simple ANOVA
-            subOptionsSimpleAnova <- subOptions
-            subOptionsSimpleAnova['fixedFactors']  <- list(subOptions[['betweenSubjectFactors']])
-            subOptionsSimpleAnova['modelTerms'] <- list(subOptions[['betweenModelTerms']])
-            subOptionsSimpleAnova['dependent'] <-  options$repeatedMeasuresCells[splitWithinNames %in% .v(level)]
-            
-            anovaModel <- .anovaModel(cbind(subDataset, subCovDataset), options = subOptionsSimpleAnova)
-            model <- anovaModel$model
-            modelSummary <- summary(model)[[1]]
-            modOneIndex <- which(subOptionsSimpleAnova[['fixedFactors']] == simpleFactor)
-            df <- modelSummary$Df[modOneIndex]
-            SS <- modelSummary$`Sum Sq`[modOneIndex]
-            if (!options$poolErrorTermSimpleEffects) {
-              fullAnovaMS <- modelSummary$`Mean Sq`[length(modelSummary$`Mean Sq`)]
-              fullAnovaDf <- modelSummary$Df[length(modelSummary$Df)]
-            }
-          }
-          MS <- SS / df
-          F <- MS / fullAnovaMS
-          p <- pf(F, df, fullAnovaDf, lower.tail = FALSE)
-          row <- list("ModOne"=level, "SumSquares"=SS, "df"=df, "MeanSquare"=MS, "F"=F, "p"=p, ".isNewGroup" = newGroup)
-        }
-        simpleEffectRows[[length(simpleEffectRows) + 1]] <- row
-      } else {
-        # This means there are two moderator variables (i.e., two factors on which to condition)
-        for (levelTwo in lvls[[2]]) {
-          newGroup <- ifelse( levelTwo == lvls[[2]][1], TRUE, FALSE )
-          # Prepare the options object to handle the contional dataset
-          # Based on whether the second moderator variable is within or between
-          if (isModeratorTwoWithin) {
-            rmFactorIndex <- which(lapply(options[['repeatedMeasuresFactors']], 
-                                          FUN = function(x){x$name == moderatorFactorTwo}) == TRUE)
-            splitNames <- unlist(lapply(strsplit(subFactorNamesV,  split = "_"), 
-                                        FUN = function(x) x[indexofOrderFactors[rmFactorIndex]]))
-            subWithinFactorNamesV <- subFactorNamesV[ !(names(subDataset) %in% .v(options[['betweenSubjectFactors']]))]
-            splitWithinNames <- unlist(lapply(strsplit(subWithinFactorNamesV,  split = "_"), 
-                                              FUN = function(x) x[indexofOrderFactors[rmFactorIndex]]))
-            subSubDataset <- subDataset[, (splitNames %in% .v(levelTwo)) | (names(subDataset) %in% .v(subOptions[['betweenSubjectFactors']]))]
-            subSubCovDataset <- subCovDataset
-            subSubOptions <- subOptions
-            whichFactorsBesidesModerator <- !unlist(lapply((subOptions[['withinModelTerms']]), FUN = function(x){grepl(moderatorFactorTwo, x)}))
-            subSubOptions[['withinModelTerms']] <- subOptions[['withinModelTerms']][whichFactorsBesidesModerator]
-            whichFactorToRemove <- which(lapply(subOptions[['repeatedMeasuresFactors']], 
-                                                FUN = function(x){x$name == moderatorFactorTwo}) == TRUE)
-            subSubOptions[['repeatedMeasuresFactors']] <- subOptions[['repeatedMeasuresFactors']][-whichFactorToRemove]
-            subSubOptions[['repeatedMeasuresCells']]<- subOptions$repeatedMeasuresCells[(splitWithinNames %in% .v(levelTwo))]
-            
-          } else {
-            subSubDataset <- subset(subDataset, subDataset[terms.base64[2]] == levelTwo)
-            if (covariatesInModel) {
-              subSubCovDataset  <- subset(subCovDataset, subDataset[terms.base64[2]] == levelTwo)
-            } else {
-              subSubCovDataset <- subCovDataset[subDataset[terms.base64[2]] == levelTwo,] 
-            }
-            subSubOptions <- subOptions
-            whichFactorsBesidesModerator <- !unlist(lapply((subOptions[['betweenModelTerms']]), FUN = function(x){grepl(moderatorFactorTwo, x)}))
-            subSubOptions[['betweenModelTerms']] <- subOptions[['betweenModelTerms']][whichFactorsBesidesModerator]
-          }
-          
-          areSimpleFactorCellsDropped <- ifelse(isSimpleFactorWithin, FALSE, (nrow(unique(subSubDataset[simpleFactor.base64])) <  
-                                                                                nrow(unique(dataset[simpleFactor.base64]))))
-          
-          if (nrow(subSubDataset) < 3 || areSimpleFactorCellsDropped) {
-            row <- list("ModOne"=level, "ModTwo" = levelTwo, "SumSquares"=".", "df"=".", "MeanSquare"=".", "F"=".", "p"=".", ".isNewGroup" = newGroup)
-            .addFootnote(footnotes, text = paste0("Not enough observations in cell ",level, " of ", moderatorFactorOne, " and ",
-                                                  levelTwo," of ", moderatorFactorTwo), symbol = "<em>Note.</em>")
-          } else {
-            if (length(subSubOptions[['repeatedMeasuresFactors']]) > 0) {
-              # There are still multiple levels of RM factors, so proceed with conditional RM ANOVA
-              anovaModel <- .rmAnovaComputeResults(cbind(subSubDataset, subSubCovDataset), subSubOptions, status = status)
-              modelSummary <- anovaModel$model
-              if (subSubOptions$sumOfSquares != "type1") {
-                modTwoIndex <- which(row.names(modelSummary) == .v(simpleFactor))
-                df <- modelSummary[modTwoIndex,'num Df']
-                SS <- modelSummary[modTwoIndex,'Sum Sq']   
-                if (!options$poolErrorTermSimpleEffects) {
-                  fullAnovaMS <- modelSummary[modTwoIndex,'Error SS'] / modelSummary[modTwoIndex,'den Df']
-                  fullAnovaDf <- modelSummary[modTwoIndex,'den Df']
-                }
-              } else {
-                modelSummary <- modelSummary[[-1]][[1]]
-                modTwoIndex <- which(row.names(modelSummary) == .v(simpleFactor))
-                df <- modelSummary[modTwoIndex,'Df']
-                SS <- modelSummary[modTwoIndex,'Sum Sq']   
-                if (!options$poolErrorTermSimpleEffects) {
-                  fullAnovaMS <- modelSummary['Residuals','Mean Sq']
-                  fullAnovaDf <- modelSummary['Residuals','Df']
-                }
-              }
-              
-            } else {
-              # There is only one level of RM factor left, so proceed with conditional simple ANOVA
-              subSubOptionsSimpleAnova <- subSubOptions
-              subSubOptionsSimpleAnova['fixedFactors']  <- subSubOptions[['betweenSubjectFactors']]
-              subSubOptionsSimpleAnova['modelTerms'] <- list(subSubOptions[['betweenModelTerms']])
-              subSubOptionsSimpleAnova['dependent'] <-  subSubOptions[['repeatedMeasuresCells']]
-              anovaModel <- .anovaModel(cbind(subSubDataset, subSubCovDataset), options = subSubOptionsSimpleAnova)
-              model <- anovaModel$model
-              modelSummary <- summary(model)[[1]]
-              modTwoIndex <- which(subSubOptionsSimpleAnova[['fixedFactors']] == simpleFactor)
-              df <- modelSummary$Df[modTwoIndex]
-              SS <- modelSummary$`Sum Sq`[modTwoIndex]
-              if (!options$poolErrorTermSimpleEffects) {
-                fullAnovaMS <- modelSummary$`Mean Sq`[length(modelSummary$`Mean Sq`)]
-                fullAnovaDf <- modelSummary$Df[length(modelSummary$Df)]
-              }
-            }
-            
-            MS <- SS / df
-            F <- MS / fullAnovaMS
-            p <- pf(F, df, fullAnovaDf, lower.tail = FALSE)
-            row <- list("ModOne"=level, "ModTwo" = levelTwo, "SumSquares"=SS, "df"=df, "MeanSquare"=MS, "F"=F, "p"=p, ".isNewGroup" = newGroup)
-          }
-          simpleEffectRows[[length(simpleEffectRows) + 1]] <- row
-        }
-      }
-      
-      
-    }
-    
-    simpleEffectsTable[["data"]] <- simpleEffectRows
-    
-    if (options$sumOfSquares == "type1") {
-      
-      .addFootnote(footnotes, text = "Type I Sum of Squares", symbol = "<em>Note.</em>")
-      
-    } else if (options$sumOfSquares == "type2") {
-      
-      .addFootnote(footnotes, text = "Type II Sum of Squares", symbol = "<em>Note.</em>")
-      
-    } else if (options$sumOfSquares == "type3") {
-      
-      .addFootnote(footnotes, text = "Type III Sum of Squares", symbol = "<em>Note.</em>")
-      
-    }
-    
-  } else {
-    if(options$sumOfSquares == "type1" ) {
-      .addFootnote(footnotes, text = "Simple effects not yet available for type 1 SS.", 
-                   symbol = "<em>Note.</em>")  }
-    simpleEffectsTable[["data"]]  <- list(list("ModOne"=terms.normal, "SumSquares"=".", "df"=".", "MeanSquare"=".", "F"=".", "p"=".", ".isNewGroup" = TRUE))
-  }
+  typeFootnote <- switch(options$sumOfSquares,
+                         type1 = "Type I Sum of Squares",
+                         type2 = "Type II Sum of Squares",
+                         type3 = "Type III Sum of Squares")
+  simpleEffectsTable$addFootnote(message = typeFootnote, symbol = "<em>Note.</em>")
   
-  simpleEffectsTable[["footnotes"]] <- as.list(footnotes)
-  simpleEffectsTable[["status"]] <- "complete"
+  simpleEffectsTable$addCitation("Howell, D. C. (2002). Statistical Methods for Psychology (8th. ed.). Pacific Grove, CA: Duxberry. ")
   
-  if (perform == "run" && status$ready && status$error == FALSE)  {
-    
-    stateSimpleEffects <- simpleEffectsTable
-    
-  } else {
-    
-    stateSimpleEffects <- NULL
-    
-  }
-  simpleEffectsTable[["citation"]] <- list(
-    "Howell, D. C. (2002). Statistical Methods for Psychology (8th. ed.). Pacific Grove, CA: Duxberry. "
-  )
-  
-  list(result=simpleEffectsTable, status=status, stateSimpleEffects=stateSimpleEffects)
-}
+  if (!ready) 
+    return()
 
+  fullModel <- rmAnovaContainer[["anovaResult"]]$object$fullModel
+  fullTable <- rmAnovaContainer[["anovaResult"]]$object$anovaResult
+  
+  lvls <- list()
+  factors <- list()
+
+  for (variable in moderatorTerms) {
+    
+    factor <- longData[[ .v(variable) ]]
+    factors[[length(factors)+1]] <- factor
+    lvls[[variable]] <- levels(factor)
+    
+  }
+  
+  simpleEffectResult <- rev(expand.grid(rev(lvls), stringsAsFactors = FALSE))
+  colnames(simpleEffectResult) <- c("modOne", "modTwo")[1:nMods]
+  
+  simpleEffectResult[[".isNewGroup"]] <- FALSE
+  
+  emptyCaseIndices <- emptyCases <- NULL
+  allSimpleModels <- list()
+  
+  fullResidualTable <- rmAnovaContainer[["anovaResult"]][["object"]][["residualTable"]][["None"]]
+ 
+  isMixedAnova <-   length(options[['betweenModelTerms']]) > 0
+  isSimpleFactorWithin <- !simpleFactor %in% unlist(options[['betweenModelTerms']] )
+  isModeratorOneWithin <- !moderatorTerms[1] %in% unlist(options[['betweenModelTerms']] )
+  isModeratorTwoWithin <- !moderatorTerms[2] %in% unlist(options[['betweenModelTerms']] )
+
+  
+  if (isMixedAnova & !isSimpleFactorWithin) {
+    
+    fullAnovaMS <- fullResidualTable["BetweenResidualResults", "Mean Sq"]
+    fullAnovaDf <- fullResidualTable["BetweenResidualResults", "num Df"]
+    
+  } else {
+    
+    fullAnovaMS <- fullResidualTable[simpleFactorBase64, "Mean Sq"]
+    fullAnovaDf <- fullResidualTable[simpleFactorBase64, "num Df"]
+    
+  }
+    
+  # Remove moderator factors from model terms
+  simpleOptions <- options
+  simpleOptions$betweenModelTerms <-  options$betweenModelTerms[!(grepl(moderatorTerms[1], options$betweenModelTerms) | 
+                                                      grepl(moderatorTerms[nMods], options$betweenModelTerms))]
+  simpleOptions$withinModelTerms <-  options$withinModelTerms[!(grepl(moderatorTerms[1], options$withinModelTerms) | 
+                                                            grepl(moderatorTerms[nMods], options$withinModelTerms))]
+  
+  performBetweenAnova <- length(simpleOptions$withinModelTerms) == 0
+
+  if (performBetweenAnova) {
+    
+    simpleOptions[["fixedFactors"]]  <- simpleOptions[['betweenSubjectFactors']]
+    simpleOptions[["modelTerms"]] <- simpleOptions[['betweenModelTerms']]
+    simpleOptions[["dependent"]] <-  "dependent"
+
+    reorderModelTerms <-  .reorderModelTerms(simpleOptions)
+    modelTerms <- reorderModelTerms$modelTerms
+    simpleFormula <- as.formula(.modelFormula(modelTerms, simpleOptions)$model.def)
+    
+  } else {
+    
+    simpleFormula <- .rmModelFormula(simpleOptions)$model.def
+    
+  }
+    
+  emptyCaseIndices <- emptyCases <- NULL
+  
+  for (i in 1:nrow(simpleEffectResult)) {
+
+    subsetStatement  <- eval(parse(text=paste("longData$", .v(moderatorTerms), " == \"", 
+                                              simpleEffectResult[i, 1:nMods], 
+                                              "\"", sep = "", collapse = " & ")))
+    simpleDataset <- base::subset(longData, subsetStatement)
+    
+    if (simpleEffectResult[i, nMods] == lvls[[ nMods ]][1])
+      simpleEffectResult[[i, ".isNewGroup"]] <- TRUE
+    
+    if (nrow(simpleDataset) < 2 || 
+        nrow(unique(simpleDataset[simpleFactorBase64])) <  nrow(unique(longData[simpleFactorBase64]))) {
+      
+      emptyCaseIndices <- c(emptyCaseIndices, i)
+      emptyCases <- c(emptyCases, paste(simpleEffectResult[i, 1:nMods], collapse = ", "))
+      allSimpleModels[[i]] <- NA
+      
+    } else if (performBetweenAnova) {
+      
+      # To do: incorporate ancova functions from rewrite to take into account sum of squares
+      model <- aov(simpleFormula, simpleDataset)
+      anovaResult <-  stats::anova(model)
+      
+      if (!options$poolErrorTermSimpleEffects) {
+        fullAnovaMS <-  anovaResult["Residuals", "Mean Sq"]
+        fullAnovaDf <-  anovaResult["Residuals", "Df"]
+      }
+      
+      MS <- anovaResult[simpleFactorBase64, "Mean Sq"]
+      df <- anovaResult[simpleFactorBase64, "Df"]
+      F <- MS / fullAnovaMS
+      p <- pf(F, df, fullAnovaDf, lower.tail = FALSE)
+      simpleEffectResult[i, c("SumSq", "MeanSq", "Df", "F", "p")] <- c(anovaResult[simpleFactorBase64, "Sum Sq"], 
+                                                                       MS, df, F, p)
+      
+    } else {
+      
+      anovaResult <-  .rmAnovaComputeResults(simpleDataset, simpleOptions)$anovaResult[simpleFactorBase64, ]
+
+      if (!options$poolErrorTermSimpleEffects) {
+        fullAnovaMS <-  anovaResult[["Error SS"]] / anovaResult[["den Df"]]
+        fullAnovaDf <-  anovaResult[["den Df"]]
+      }
+      
+      MS <- anovaResult[["Mean Sq"]]
+      df <- anovaResult[["num Df"]]
+      F <- MS / fullAnovaMS
+      p <- pf(F, df, fullAnovaDf, lower.tail = FALSE)
+      simpleEffectResult[i, c("SumSq", "MeanSq", "Df", "F", "p")] <- c(anovaResult[["Sum Sq"]], 
+                                                                       MS, df, F, p)
+      
+    }
+    
+  }
+  
+  if (!is.null(emptyCaseIndices)) {
+    simpleEffectsTable$addFootnote(paste0("Not enough observations in cells ", 
+                                          paste0(" (", emptyCases, ")", collapse = ","), "."))
+  }
+
+  simpleEffectsTable$setData(simpleEffectResult)
+  
+  return()
+}
 
 .rmAnovaDescriptivesTable <- function(dataset, options, perform, status, stateDescriptivesTable) {
   

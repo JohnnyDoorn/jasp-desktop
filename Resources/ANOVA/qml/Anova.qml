@@ -99,7 +99,7 @@ Form
 	{
 		title: qsTr("Contrasts")
 		
-		ContrastsList { source: ["fixedFactors", "randomFactors"] }
+		ContrastsList { source: ["modelTerms", "randomFactors"] }
 		
 		CheckBox
 		{

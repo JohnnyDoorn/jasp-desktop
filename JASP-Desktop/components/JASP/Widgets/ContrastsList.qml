@@ -24,19 +24,23 @@ import JASP				1.0
 Item
 {
 	id					: contrastsList
-	height				: contrasts.height + (customContrastsView.visible ? customContrastsView.height : 0)
-	implicitHeight		: height
-	width				: parent.width
-	implicitWidth		: width
+	implicitHeight		: itemContrastVariables.height + (itemCustomContrasts.visible ? itemCustomContrasts.height : 0)
+	height				: implicitHeight
+	implicitWidth		: parent.width
+	width				: implicitWidth
 	L.Layout.columnSpan	: parent.columns
 
-	property alias	source					: contrasts.source
+	property alias	source					: itemContrastVariables.source
 	property string	repeatedMeasureFactors	: "repeatedMeasuresFactors"
 	property bool	addCustom				: true
+	property alias	itemContrastVariables	: itemContrastVariables
+	property alias	itemCustomContrasts		: itemCustomContrasts
+	property alias	variablesHeight			: itemContrastVariables.height
+	property alias	customContrastsHeight	: itemCustomContrasts.preferredHeight
 
 	VariablesList
 	{
-		id				: contrasts
+		id				: itemContrastVariables
 		title			: qsTr("Factors")
 		source			: "fixedFactors"
 		name			: "contrasts"
@@ -44,47 +48,39 @@ Item
 		height			: 200 * preferencesModel.uiScale
 		draggable		: false
 
-		rowComponents:
-		[
-			Component
-			{
-				DropDown
-				{
-					name		: "contrast"
-					values		: addCustom
-								  ? [
-										{ label: qsTr("none"), value: "none" },
-										{ label: qsTr("deviation"), value: "deviation" },
-										{ label: qsTr("simple"), value: "simple" },
-										{ label: qsTr("difference"), value: "difference" },
-										{ label: qsTr("Helmert"), value: "Helmert" },
-										{ label: qsTr("repeated"), value: "repeated" },
-										{ label: qsTr("polynomial"), value: "polynomial" },
-										{ label: qsTr("custom"), value: "custom" }
-									]
-								  :	[
-										{ label: qsTr("none"), value: "none" },
-										{ label: qsTr("deviation"), value: "deviation" },
-										{ label: qsTr("simple"), value: "simple" },
-										{ label: qsTr("difference"), value: "difference" },
-										{ label: qsTr("Helmert"), value: "Helmert" },
-										{ label: qsTr("repeated"), value: "repeated" },
-										{ label: qsTr("polynomial"), value: "polynomial" }
-									]
-				}
-			}
-		]
+		rowComponent: DropDown
+		{
+			name		: "contrast"
+			values		: addCustom
+						  ? [
+								{ label: qsTr("none"), value: "none" },
+								{ label: qsTr("deviation"), value: "deviation" },
+								{ label: qsTr("simple"), value: "simple" },
+								{ label: qsTr("difference"), value: "difference" },
+								{ label: qsTr("Helmert"), value: "Helmert" },
+								{ label: qsTr("repeated"), value: "repeated" },
+								{ label: qsTr("polynomial"), value: "polynomial" },
+								{ label: qsTr("custom"), value: "custom" }
+							]
+						  :	[
+								{ label: qsTr("none"), value: "none" },
+								{ label: qsTr("deviation"), value: "deviation" },
+								{ label: qsTr("simple"), value: "simple" },
+								{ label: qsTr("difference"), value: "difference" },
+								{ label: qsTr("Helmert"), value: "Helmert" },
+								{ label: qsTr("repeated"), value: "repeated" },
+								{ label: qsTr("polynomial"), value: "polynomial" }
+							]
+		}
 
 	}
 
 	ComponentsList
 	{
-		id					: customContrastsView
+		id					: itemCustomContrasts
 		name				: "customContrasts"
-		anchors.top			: contrasts.bottom
+		anchors.top			: itemContrastVariables.bottom
 		anchors.topMargin	: jaspTheme.rowSpacing
-		cellHeight			: 160 * preferencesModel.uiScale
-		height				: count * cellHeight + 10
 		visible				: count > 0
 		source				: [ { name: "contrasts", condition: "contrastValue == 'custom'", conditionVariables: [{ name: "contrastValue", component: "contrast", property: "currentValue"}] }]
 
@@ -98,14 +94,10 @@ Item
 
 			CustomContrastsTableView
 			{
-				id						: tableCustomContrasts
-				columnName				: rowValue
-				factorsSource			: contrastsList.repeatedMeasureFactors
-				name					: "values"
-				implicitHeight			: 130 * preferencesModel.uiScale
-				implicitWidth			: customContrastsView.cellWidth
-				width					: implicitWidth
-				height					: implicitHeight
+				preferredWidth	: itemCustomContrasts.width
+				name			: "Contrasts"
+				columnName		: rowValue
+				factorsSource	: contrastsList.repeatedMeasureFactors
 			}
 		}
 	}

@@ -1110,15 +1110,19 @@ AnovaRepeatedMeasures <- function(jaspResults, dataset = NULL, options) {
 
     },
     polynomial = {
+      
       contr <- contr.poly(levels)
+      
     }, 
     custom = {
-
-      customContrMat <- sapply(customContrast$values, function(x) x$values)
+# browser()
+      isContrast <- sapply(customContrast$Contrasts, function(x) x$isContrast)
+      customContrMat <- as.matrix(sapply(customContrast$Contrasts[isContrast], function(x) as.numeric(x$values)))
+      # customContrMat <- sapply(customContrast$values, function(x) x$values)
       desiredRows <- nrow(contr.helmert(levels) * -1)
 
       if (desiredRows == 2 && length(customContrMat) == 2 ) {
-        contr <- as.matrix(customContrMat)
+        contr <- t(customContrMat)
       } else {
         contr <- t(customContrMat)
       }
